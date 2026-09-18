@@ -1,0 +1,348 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  STUDENT
+  SUPERVISOR
+  COORDINATOR
+}
+
+enum StudentStatus {
+  ACTIVE
+  PENDING
+  COMPLETED
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum EstablishmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  // Login name issued by the coordinator. Nullable because accounts created
+  // before this existed have none — those still sign in with their email.
+  // Logging in accepts either, so a username may never contain "@", which is
+  // what keeps the two namespaces from colliding.
+  username  String?  @unique
+  password  String
+  name      String
+  role      Role
+  createdAt DateTime @default(now())
+
+  studentProfile     Student?
+  supervisorProfile  Supervisor?
+  coordinatorProfile Coordinator?
+
+  conversations ConversationParticipant[]
+  messagesSent  Message[]
+}
+
+model Establishment {
+  id                       String              @id @default(cuid())
+  name                     String
+  industryType             String?
+  streetAddress            String?
+  region                   String?
+  barangay                 String?
+  city                     String?
+  province                 String?
+  zipCode                  String?
+  status                   EstablishmentStatus @default(ACTIVE)
+  coordinatorFirstName     String?
+  coordinatorLastName      String?
+  coordinatorMiddleInitial String?
+  coordinatorAge           Int?
+  coordinatorGender        String?
+  coordinatorPosition      String?
+  coordinatorAddress       String?
+  coordinatorContact       String?
+  coordinatorEmail         String?
+  createdAt                DateTime            @default(now())
+
+  supervisors Supervisor[]
+  students    Student[]
+}
+
+model Supervisor {
+  id              String        @id @default(cuid())
+  userId          String        @unique
+  user            User          @relation(fields: [userId], references: [id])
+  establishmentId String
+  establishment   Establishment @relation(fields: [establishmentId], references: [id])
+  position        String?
+
+  attendanceApprovals Attendance[] @relation("ApprovedBy")
+  evaluations         Evaluation[]
+}
+
+model Coordinator {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  reviewedDocuments Document[]
+}
+
+model Student {
+  id              String         @id @default(cuid())
+  userId          String         @unique
+  user            User           @relation(fields: [userId], references: [id])
+  studentIdNumber String         @unique
+  course          String?
+  establishmentId String?
+  establishment   Establishment? @relation(fields: [establishmentId], references: [id])
+  requiredHours   Int            @default(0)
+  startDate       DateTime?
+  status          StudentStatus  @default(ACTIVE)
+
+  // Personal details captured by the coordinator's student form. All nullable
+  // because every student created before this migration has none of them.
+  // `age` is stored alongside `dateOfBirth` rather than derived, matching how
+  // Establishment already stores `coordinatorAge`.
+  firstName     String?
+  lastName      String?
+  middleInitial String?
+  age           Int?
+  dateOfBirth   DateTime?
+  school        String?
+  contactNumber String?
+  address       String?
+  yearLevel     String?
+  gender        String?
+  endDate       DateTime?
+
+  attendances Attendance[]
+  documents   Document[]
+  credentials Credential[]
+  evaluations Evaluation[]
+}
+
+model Attendance {
+  id        String           @id @default(cuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id])
+  date      DateTime
+  timeInAM  DateTime?
+  timeOutAM DateTime?
+  timeInPM  DateTime?
+  timeOutPM DateTime?
+  remarks   String?
+  status    AttendanceStatus @default(PENDING)
+
+  // Why a supervisor declined. Kept separate from `remarks`, which belongs to
+  // the student — the prototype overwrote the student's note with the decline
+  // reason, losing what they had written.
+  declineReason String?
+
+  approvedById String?
+  approvedBy   Supervisor? @relation("ApprovedBy", fields: [approvedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  // One log per student per day. Without this a student can submit the same
+  // day repeatedly and every hours total counts it more than once.
+  // `date` is normalised to UTC midnight on write (see StudentService), which
+  // is what makes the constraint meaningful.
+  @@unique([studentId, date])
+}
+
+model Document {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+  name      String
+  fileUrl   String
+  status    String  @default("PENDING")
+
+  // Who actioned this review, their note, and when. `reviewNote` is required
+  // by the service when status is REJECTED, mirroring
+  // Attendance.declineReason; unlike Attendance.approvedById, this column is
+  // named for what it actually means — the reviewer, not just "who approved".
+  reviewedById String?
+  reviewedBy   Coordinator? @relation(fields: [reviewedById], references: [id])
+  reviewNote   String?
+  reviewedAt   DateTime?
+
+  uploadedAt DateTime @default(now())
+}
+
+model Credential {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  type      String
+  fileUrl   String
+  createdAt DateTime @default(now())
+}
+
+model Evaluation {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id])
+  supervisorId String
+  supervisor   Supervisor @relation(fields: [supervisorId], references: [id])
+
+  // The sheet this evaluation was written on, and the scores it was given.
+  //
+  // The form used to be nineteen fixed Int columns here; it is now a versioned
+  // template the coordinator owns (EvaluationTemplate). A signed sheet keeps
+  // its own `templateId` forever, so the wording, the item set and the maximum
+  // it was signed with can never be rewritten by a later version. Editing an
+  // old evaluation validates and renders against THAT version.
+  //
+  // `onDelete: Restrict` is the one referential action in this schema. It is a
+  // restriction, not a cascade: the repo's policy is that deletes are spelled
+  // out in src/common/cascade-delete.ts, and this says the opposite — a
+  // template with evaluations on it must never be deleted at all.
+  templateId String
+  template   EvaluationTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+  scores     EvaluationScore[]
+
+  // No uniqueness constraint on (studentId, supervisorId): a student is
+  // deliberately evaluated more than once.
+
+  // The form's TOTAL RATING: the raw sum of this sheet's items. Computed and
+  // stored server-side, never accepted from the client. Deliberately raw — the
+  // form has no percentage, letter grade or performance band.
+  totalRating Int
+
+  // The denominator that TOTAL RATING was signed against (item count x
+  // MAX_SCORE). Stored and frozen, because it is no longer always 95: a later
+  // template version with more or fewer items changes it for new sheets only.
+  maxTotalRating Int
+
+  // The form's header fields. `trainingEmployedAt`, `evaluatorName` and
+  // `evaluatorPosition` are snapshots taken when the evaluation is written, so
+  // renaming or deleting a supervisor later cannot rewrite a signed record.
+  trainingStartedAt  DateTime?
+  trainingEndedAt    DateTime?
+  trainingEmployedAt String?
+  evaluatorName      String?
+  evaluatorPosition  String?
+
+  comments        String?
+  recommendations String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One version of the school's evaluation sheet.
+///
+/// At most one PUBLISHED and at most one DRAFT exist at any time; everything
+/// else is ARCHIVED. A PUBLISHED or ARCHIVED template, and its sections and
+/// items, are immutable — edits happen on the draft and take effect when it is
+/// published, which archives the outgoing version. `status` stays a plain
+/// String (DRAFT / PUBLISHED / ARCHIVED) rather than an enum, the same call as
+/// Document.status.
+model EvaluationTemplate {
+  id          String    @id @default(cuid())
+  version     Int       @unique
+  status      String    @default("DRAFT")
+  /// The sheet title as printed, e.g. ON-THE-JOB TRAINING PERFORMANCE EVALUATION SHEET.
+  title       String
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  sections    EvaluationTemplateSection[]
+  evaluations Evaluation[]
+}
+
+/// A numbered section of the sheet. The printed numeral (I, II, III ...) is
+/// derived from `order` at read time, never stored, so reordering cannot
+/// desync it from what is printed.
+model EvaluationTemplateSection {
+  id         String             @id @default(cuid())
+  templateId String
+  template   EvaluationTemplate @relation(fields: [templateId], references: [id])
+  key        String
+  label      String
+  order      Int
+
+  items EvaluationTemplateItem[]
+
+  @@unique([templateId, key])
+}
+
+/// One scored row of the sheet. The printed letter (A, B, C ...) is derived
+/// from `order` at read time, and the section's maxPoints is its item count x
+/// MAX_SCORE — neither is stored.
+model EvaluationTemplateItem {
+  id        String                    @id @default(cuid())
+  sectionId String
+  section   EvaluationTemplateSection @relation(fields: [sectionId], references: [id])
+  key       String
+  label     String
+  order     Int
+
+  @@unique([sectionId, key])
+}
+
+/// One item's score on one evaluation.
+///
+/// `itemKey` is a plain string, not a foreign key to EvaluationTemplateItem:
+/// the score is frozen against the template version the sheet was signed on,
+/// and joining it to a live row would reintroduce exactly the coupling the
+/// versioning removes.
+model EvaluationScore {
+  id           String     @id @default(cuid())
+  evaluationId String
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id])
+  itemKey      String
+  score        Int
+
+  @@unique([evaluationId, itemKey])
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  isGroup   Boolean  @default(false)
+  name      String?
+  createdBy String
+  createdAt DateTime @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+}
+
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  joinedAt       DateTime     @default(now())
+  lastReadAt     DateTime?
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id])
+  content        String
+  createdAt      DateTime     @default(now())
+}
