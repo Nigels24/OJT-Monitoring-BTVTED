@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { hoursForAttendance, totalHours } from '../common/attendance-hours';
+import { progressFromRows } from '../common/assignment-progress';
+import {
+  attendanceBelongsToEstablishment,
+  attendanceEstablishmentWhere,
+} from '../common/supervisor-scope';
 import {
   SheetTemplate,
   buildSections,
@@ -56,13 +61,33 @@ export class SupervisorService {
     // rejected query used to take down more than the dashboard. Each half
     // degrades to empty, the reason is logged, and `failedSections` tells the
     // client what to offer a retry for.
+    //
+    // The student roster below is TrainingAssignment-scoped, the same rule
+    // `getStudents` uses (see its doc comment): an ACTIVE assignment here, or
+    // a non-active one that still has stranded PENDING attendance here. A
+    // student who transferred out with nothing left to approve correctly
+    // drops off this establishment's counts, even though the deprecated
+    // `Student.establishmentId` mirror may briefly still point elsewhere.
     const settled = await Promise.allSettled([
-      this.prisma.client.student.findMany({
-        where: { establishmentId: supervisor.establishmentId },
-        select: { id: true, status: true, requiredHours: true },
+      this.prisma.client.trainingAssignment.findMany({
+        where: {
+          establishmentId: supervisor.establishmentId,
+          OR: [
+            { status: 'ACTIVE' },
+            {
+              status: { not: 'ACTIVE' },
+              attendances: { some: { status: 'PENDING' } },
+            },
+          ],
+        },
+        select: {
+          studentId: true,
+          status: true,
+          student: { select: { status: true } },
+        },
       }),
       this.prisma.client.attendance.findMany({
-        where: { student: { establishmentId: supervisor.establishmentId } },
+        where: attendanceEstablishmentWhere(supervisor.establishmentId),
         select: {
           status: true,
           timeInAM: true,
@@ -84,7 +109,7 @@ export class SupervisorService {
       );
     };
 
-    const students = settledOr(settled[0], [], 'students', fail);
+    const assignments = settledOr(settled[0], [], 'students', fail);
     const attendances = settledOr(settled[1], [], 'attendance', fail);
 
     if (settled.every((result) => result.status === 'rejected')) {
@@ -101,6 +126,22 @@ export class SupervisorService {
       (a) => a.student.status !== 'COMPLETED',
     );
 
+    // One row per student (a student can have at most one matching
+    // assignment here in practice — createPlacement always transfers the
+    // prior one out first), preferring the ACTIVE row when more than one
+    // somehow matches.
+    const byStudent = new Map<string, (typeof assignments)[number]>();
+    for (const assignment of assignments) {
+      const existing = byStudent.get(assignment.studentId);
+      if (
+        !existing ||
+        (assignment.status === 'ACTIVE' && existing.status !== 'ACTIVE')
+      ) {
+        byStudent.set(assignment.studentId, assignment);
+      }
+    }
+    const roster = [...byStudent.values()];
+
     return {
       /** Sections whose data could not be loaded; the client offers a retry. */
       failedSections: [...failedSections],
@@ -112,10 +153,11 @@ export class SupervisorService {
       },
       establishment: supervisor.establishment,
       stats: {
-        totalStudents: students.length,
-        activeStudents: students.filter((s) => s.status === 'ACTIVE').length,
-        completedStudents: students.filter((s) => s.status === 'COMPLETED')
-          .length,
+        totalStudents: roster.length,
+        activeStudents: roster.filter((s) => s.status === 'ACTIVE').length,
+        completedStudents: roster.filter(
+          (s) => s.student.status === 'COMPLETED',
+        ).length,
         pendingApprovals: activeQueue.filter((a) => a.status === 'PENDING')
           .length,
         approvedThisWeek: approved.filter((a) => a.createdAt >= weekStart)
@@ -129,7 +171,10 @@ export class SupervisorService {
   }
 
   /**
-   * Attendance for every student at this supervisor's establishment.
+   * Attendance for every student at this supervisor's establishment —
+   * scoped by `attendanceEstablishmentWhere` (see its doc comment), not
+   * `Student.establishmentId` directly, so a row from before a transfer stays
+   * visible to the supervisor who needs to approve it.
    *
    * `status` narrows the list; omitting it returns all of them. (This method
    * was previously called getPendingAttendance but never filtered, so the
@@ -144,14 +189,16 @@ export class SupervisorService {
 
     const records = await this.prisma.client.attendance.findMany({
       where: {
-        student: {
-          establishmentId: supervisor.establishmentId,
+        AND: [
+          attendanceEstablishmentWhere(supervisor.establishmentId),
           // Students marked COMPLETED are a finished OJT batch. Their logs stay
           // in the database — nothing is deleted — but they drop out of the
           // working queue so the next intake starts with a clean board.
-          ...(includeCompleted ? {} : { status: { not: 'COMPLETED' } }),
-        },
-        ...(status ? { status } : {}),
+          ...(includeCompleted
+            ? []
+            : [{ student: { status: { not: 'COMPLETED' as const } } }]),
+          ...(status ? [{ status }] : []),
+        ],
       },
       include: {
         student: {
@@ -176,17 +223,44 @@ export class SupervisorService {
     }));
   }
 
-  /** Students assigned to this supervisor's establishment. */
+  /**
+   * Students visible to this supervisor: an ACTIVE assignment at their
+   * establishment, PLUS a student whose non-active (TRANSFERRED/COMPLETED)
+   * assignment here still has PENDING attendance stranded on it — those hours
+   * were observed here and can only be approved by this supervisor, so the
+   * student cannot simply disappear from the roster once they move on.
+   * `assignmentStatus` on each row lets the client label the second case
+   * ("Transferred — pending approvals") instead of showing it as if the
+   * student were still actively placed.
+   *
+   * Progress shown is for THIS establishment's assignment, never the
+   * student's current one elsewhere — `progressFromRows` runs against the
+   * matched assignment's own fields and its own attendance, fetched together
+   * in one query (no second batched round trip needed, since the relation is
+   * already scoped down to at most one row per assignment).
+   */
   async getStudents(userId: string) {
     const supervisor = await this.getSupervisorByUserId(userId);
 
-    const students = await this.prisma.client.student.findMany({
-      where: { establishmentId: supervisor.establishmentId },
+    const assignments = await this.prisma.client.trainingAssignment.findMany({
+      where: {
+        establishmentId: supervisor.establishmentId,
+        OR: [
+          { status: 'ACTIVE' },
+          {
+            status: { not: 'ACTIVE' },
+            attendances: { some: { status: 'PENDING' } },
+          },
+        ],
+      },
       include: {
-        user: { select: { id: true, email: true, name: true } },
+        student: {
+          include: { user: { select: { id: true, email: true, name: true } } },
+        },
         attendances: {
-          where: { status: 'APPROVED' },
+          where: { status: { in: ['APPROVED', 'PENDING'] } },
           select: {
+            status: true,
             timeInAM: true,
             timeOutAM: true,
             timeInPM: true,
@@ -194,13 +268,38 @@ export class SupervisorService {
           },
         },
       },
-      orderBy: { user: { name: 'asc' } },
+      orderBy: { startDate: 'desc' },
     });
 
-    return students.map(({ attendances, ...student }) => ({
-      ...student,
-      completedHours: totalHours(attendances),
-    }));
+    // One row per student: prefer the ACTIVE assignment here; between
+    // multiple non-active ones (should not normally happen — see above) the
+    // most recently started wins, which `orderBy: startDate desc` already
+    // guarantees for the first one seen per student.
+    const byStudent = new Map<string, (typeof assignments)[number]>();
+    for (const assignment of assignments) {
+      const existing = byStudent.get(assignment.studentId);
+      if (
+        !existing ||
+        (assignment.status === 'ACTIVE' && existing.status !== 'ACTIVE')
+      ) {
+        byStudent.set(assignment.studentId, assignment);
+      }
+    }
+
+    return [...byStudent.values()]
+      .map(({ student, attendances, ...assignment }) => {
+        const progress = progressFromRows(assignment, attendances);
+        return {
+          ...student,
+          assignmentId: assignment.id,
+          assignmentStatus: assignment.status,
+          hasActiveAssignment: assignment.status === 'ACTIVE',
+          completedHours: progress.approvedHours,
+          requiredHours: progress.requiredHours,
+          progress,
+        };
+      })
+      .sort((a, b) => a.user.name.localeCompare(b.user.name));
   }
 
   /**
@@ -283,12 +382,15 @@ export class SupervisorService {
   ) {
     const attendance = await this.prisma.client.attendance.findUnique({
       where: { id: attendanceId },
-      include: { student: true },
+      include: {
+        student: { select: { establishmentId: true } },
+        trainingAssignment: { select: { establishmentId: true } },
+      },
     });
     if (!attendance) {
       throw new NotFoundException('Attendance record not found');
     }
-    if (attendance.student.establishmentId !== establishmentId) {
+    if (!attendanceBelongsToEstablishment(attendance, establishmentId)) {
       throw new ForbiddenException(
         'This attendance record belongs to a different establishment',
       );
@@ -304,7 +406,7 @@ export class SupervisorService {
    */
   async createEvaluation(userId: string, data: EvaluationInput) {
     const supervisor = await this.getSupervisorWithHeaderFields(userId);
-    const student = await this.verifyStudentUnderSupervisor(
+    const assignment = await this.resolveEvaluationAssignment(
       data.studentId,
       supervisor.establishmentId,
     );
@@ -319,6 +421,7 @@ export class SupervisorService {
         studentId: data.studentId,
         supervisorId: supervisor.id,
         templateId: template.id,
+        trainingAssignmentId: assignment.id,
         scores: { create: scores },
         // Both derived here, never read from the request — otherwise a caller
         // could submit low scores alongside a full total.
@@ -326,7 +429,7 @@ export class SupervisorService {
         // Frozen with the sheet: a later version with more or fewer items must
         // not change what this one was scored out of.
         maxTotalRating: templateMaxTotalRating(template),
-        ...this.headerFields(data, supervisor, student),
+        ...this.headerFields(data, supervisor),
         comments: data.comments,
         recommendations: data.recommendations,
       },
@@ -415,22 +518,30 @@ export class SupervisorService {
    * `trainingEmployedAt`, `evaluatorName` and `evaluatorPosition` are
    * snapshotted from the current rows rather than joined on read, so renaming
    * or deleting a supervisor later cannot rewrite a sheet that was already
-   * signed off.
+   * signed off. `trainingEmployedAt` is the supervisor's OWN establishment,
+   * not the student's current one — by the time this is called,
+   * `resolveEvaluationAssignment` has already confirmed the two agree for the
+   * assignment being evaluated, and reading it off the student directly would
+   * print the student's establishment AFTER a later transfer instead of the
+   * one this sheet was actually written for.
    */
   private headerFields(
     data: Omit<EvaluationInput, 'studentId'>,
-    supervisor: { position: string | null; user: { name: string } },
-    student: { establishment: { name: string } | null },
+    supervisor: {
+      position: string | null;
+      user: { name: string };
+      establishment: { name: string } | null;
+    },
   ) {
     return {
       ...trainingDates(data),
-      trainingEmployedAt: student.establishment?.name ?? null,
+      trainingEmployedAt: supervisor.establishment?.name ?? null,
       evaluatorName: supervisor.user.name,
       evaluatorPosition: supervisor.position,
     };
   }
 
-  /** The supervisor plus the two columns the sheet's header snapshots. */
+  /** The supervisor plus the columns the sheet's header snapshots. */
   private async getSupervisorWithHeaderFields(userId: string) {
     const supervisor = await this.prisma.client.supervisor.findUnique({
       where: { userId },
@@ -439,6 +550,7 @@ export class SupervisorService {
         establishmentId: true,
         position: true,
         user: { select: { name: true } },
+        establishment: { select: { name: true } },
       },
     });
     if (!supervisor) {
@@ -447,24 +559,34 @@ export class SupervisorService {
     return supervisor;
   }
 
-  private async verifyStudentUnderSupervisor(
+  /**
+   * The assignment a new evaluation attaches to: the student's ACTIVE
+   * assignment at this establishment if they have one, else their most
+   * recently started non-active one here — a supervisor can still write up a
+   * student who has since transferred out, same as the evaluation list
+   * already keeps a supervisor's own sheets visible past a transfer (see
+   * `getEvaluations`). Rejects when the student has never had ANY assignment
+   * at this establishment at all.
+   */
+  private async resolveEvaluationAssignment(
     studentId: string,
     establishmentId: string,
   ) {
-    const student = await this.prisma.client.student.findUnique({
-      where: { id: studentId },
-      select: {
-        id: true,
-        establishmentId: true,
-        establishment: { select: { name: true } },
-      },
+    const active = await this.prisma.client.trainingAssignment.findFirst({
+      where: { studentId, establishmentId, status: 'ACTIVE' },
     });
-    if (!student || student.establishmentId !== establishmentId) {
+    if (active) return active;
+
+    const mostRecent = await this.prisma.client.trainingAssignment.findFirst({
+      where: { studentId, establishmentId },
+      orderBy: { startDate: 'desc' },
+    });
+    if (!mostRecent) {
       throw new ForbiddenException(
-        'This student is not under your establishment',
+        'This student has never had a training assignment at your establishment',
       );
     }
-    return student;
+    return mostRecent;
   }
 
   /**

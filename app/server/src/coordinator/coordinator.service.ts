@@ -8,8 +8,14 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Weekday } from '../../generated/prisma/client';
 import { totalHours } from '../common/attendance-hours';
 import { MS_PER_DAY, manilaToday, startOfUtcDay } from '../common/dates';
+import {
+  computeProgress,
+  progressFromRows,
+  ZERO_ASSIGNMENT_PROGRESS,
+} from '../common/assignment-progress';
 import {
   EVALUATION_INCLUDE,
   withSectionTotals,
@@ -48,6 +54,9 @@ interface StudentDetails {
   address?: string | null;
   course?: string | null;
   yearLevel?: string | null;
+  courseId?: string | null;
+  blockId?: string | null;
+  courseYearLevel?: number | null;
   establishmentId?: string | null;
   requiredHours?: number;
   startDate?: string | null;
@@ -70,6 +79,71 @@ export class CoordinatorService {
     throw new ConflictException(
       clash.email === email ? 'Email already in use' : 'Username already taken',
     );
+  }
+
+  /**
+   * Validates courseId/blockId (existence, and that the block belongs to the
+   * course) and derives fresh values for the deprecated `course`/`yearLevel`
+   * free-text columns from them, so screens that still read those two columns
+   * keep showing something accurate instead of going stale the moment a
+   * student is put on a structured course. A no-op — `data` passed through
+   * untouched — when none of courseId/blockId/courseYearLevel are in the
+   * request, which is the entire existing free-text create/update path.
+   *
+   * `existingCourseId` is the student's current courseId (null for a brand
+   * new student); it is the fallback used to validate a `blockId` sent
+   * without an accompanying `courseId` on an update.
+   */
+  private async resolveCourseFields(
+    data: StudentDetails,
+    existingCourseId: string | null,
+  ): Promise<StudentDetails> {
+    if (
+      data.courseId === undefined &&
+      data.blockId === undefined &&
+      data.courseYearLevel === undefined
+    ) {
+      return data;
+    }
+
+    const resolved: StudentDetails = { ...data };
+    const effectiveCourseId =
+      data.courseId !== undefined ? data.courseId : existingCourseId;
+
+    if (effectiveCourseId) {
+      const course = await this.prisma.client.course.findUnique({
+        where: { id: effectiveCourseId },
+        select: { name: true },
+      });
+      if (!course) {
+        throw new BadRequestException('courseId does not match a course');
+      }
+      resolved.course = course.name;
+    } else if (data.courseId === null) {
+      resolved.course = null;
+    }
+
+    if (data.blockId) {
+      const block = await this.prisma.client.block.findUnique({
+        where: { id: data.blockId },
+        select: { courseId: true },
+      });
+      if (!block) {
+        throw new BadRequestException('blockId does not match a block');
+      }
+      if (block.courseId !== effectiveCourseId) {
+        throw new BadRequestException(
+          'Block does not belong to the selected course',
+        );
+      }
+    }
+
+    if (data.courseYearLevel !== undefined) {
+      resolved.yearLevel =
+        data.courseYearLevel === null ? null : String(data.courseYearLevel);
+    }
+
+    return resolved;
   }
 
   async createSupervisor(data: {
@@ -131,6 +205,8 @@ export class CoordinatorService {
       );
     }
 
+    const resolved = await this.resolveCourseFields(data, null);
+
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
     // User and Student are separate rows. Without a transaction a failure on
@@ -152,7 +228,7 @@ export class CoordinatorService {
           userId: created.id,
           studentIdNumber: data.studentIdNumber,
           school: SCHOOL_NAME,
-          ...studentProfileData(data),
+          ...studentProfileData(resolved),
         },
       });
 
@@ -179,13 +255,18 @@ export class CoordinatorService {
           },
         },
         establishment: { select: { id: true, name: true } },
-        attendances: {
-          where: { status: 'APPROVED' },
+        // At most one ACTIVE row per student — nothing enforces that in the
+        // schema, but `createPlacement` always transfers the prior one out
+        // before creating the next, so there is only ever one to `take`.
+        trainingAssignments: {
+          where: { status: 'ACTIVE' },
+          take: 1,
           select: {
-            timeInAM: true,
-            timeOutAM: true,
-            timeInPM: true,
-            timeOutPM: true,
+            id: true,
+            requiredHours: true,
+            dutyDays: true,
+            startDate: true,
+            endDate: true,
           },
         },
         _count: {
@@ -200,12 +281,84 @@ export class CoordinatorService {
       orderBy: { user: { createdAt: 'desc' } },
     });
 
-    // `attendances` is only fetched to total the hours; drop it from the
-    // response so the list payload stays small.
-    return students.map(({ attendances, ...student }) => ({
-      ...student,
-      completedHours: totalHours(attendances),
-    }));
+    const progressByStudent = await this.batchAssignmentProgress(
+      students.map((s) => s.trainingAssignments[0] ?? null),
+    );
+
+    // `trainingAssignments` is only fetched to derive progress; drop it from
+    // the response so the list payload stays small.
+    return students.map(({ trainingAssignments, ...student }, index) => {
+      const progress = progressByStudent[index];
+      return {
+        ...student,
+        hasActiveAssignment: trainingAssignments.length > 0,
+        // Kept at top level, not just inside `progress`, so the existing
+        // client types (studentApi.ts) that already read these two fields
+        // keep compiling unchanged — their values now come from the ACTIVE
+        // assignment instead of all-time attendance.
+        completedHours: progress.approvedHours,
+        requiredHours: progress.requiredHours,
+        progress,
+      };
+    });
+  }
+
+  /**
+   * Progress for many students' ACTIVE assignments in two flat queries
+   * (never one per student) — the batch-then-group-in-memory shape
+   * `getAttendanceOversight` already uses, applied to `progressFromRows`
+   * (common/assignment-progress.ts) so the math itself lives in one place.
+   *
+   * `assignments[i]` is student i's ACTIVE assignment, or `null` if they have
+   * none; the returned array is the same length and order, `null` slots
+   * becoming `ZERO_ASSIGNMENT_PROGRESS` rather than crashing.
+   */
+  private async batchAssignmentProgress(
+    assignments: ({
+      id: string;
+      requiredHours: number;
+      dutyDays: string[];
+      startDate: Date;
+      endDate: Date | null;
+    } | null)[],
+  ) {
+    const activeIds = assignments
+      .filter((a): a is NonNullable<typeof a> => a !== null)
+      .map((a) => a.id);
+
+    const rows = activeIds.length
+      ? await this.prisma.client.attendance.findMany({
+          where: {
+            trainingAssignmentId: { in: activeIds },
+            status: { in: ['APPROVED', 'PENDING'] },
+          },
+          select: {
+            trainingAssignmentId: true,
+            status: true,
+            timeInAM: true,
+            timeOutAM: true,
+            timeInPM: true,
+            timeOutPM: true,
+          },
+        })
+      : [];
+
+    const rowsByAssignment = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const id = row.trainingAssignmentId as string;
+      const list = rowsByAssignment.get(id) ?? [];
+      list.push(row);
+      rowsByAssignment.set(id, list);
+    }
+
+    return assignments.map((assignment) =>
+      assignment
+        ? progressFromRows(
+            assignment,
+            rowsByAssignment.get(assignment.id) ?? [],
+          )
+        : ZERO_ASSIGNMENT_PROGRESS,
+    );
   }
 
   async listSupervisors() {
@@ -289,13 +442,15 @@ export class CoordinatorService {
         include: {
           user: { select: { name: true, createdAt: true } },
           establishment: { select: { name: true } },
-          attendances: {
-            where: { status: 'APPROVED' },
+          trainingAssignments: {
+            where: { status: 'ACTIVE' },
+            take: 1,
             select: {
-              timeInAM: true,
-              timeOutAM: true,
-              timeInPM: true,
-              timeOutPM: true,
+              id: true,
+              requiredHours: true,
+              dutyDays: true,
+              startDate: true,
+              endDate: true,
             },
           },
         },
@@ -351,6 +506,27 @@ export class CoordinatorService {
       settledOr(settled[11], 0, 'stats', fail),
     ] as const;
 
+    // A second, un-settled fetch chained off `recentStudents` — batched the
+    // same way `listStudents`/`batchAssignmentProgress` is, never one query
+    // per row. Wrapped by hand rather than folded into the `settled` array
+    // above because it depends on `recentStudents`' own result (which active
+    // assignment ids to fetch attendance for); on failure it degrades exactly
+    // like every other section here: zeroed progress, logged, and
+    // "recentStudents" still ends up in `failedSections`.
+    let recentStudentsProgress: Awaited<
+      ReturnType<typeof this.batchAssignmentProgress>
+    >;
+    try {
+      recentStudentsProgress = await this.batchAssignmentProgress(
+        recentStudents.map((s) => s.trainingAssignments[0] ?? null),
+      );
+    } catch (err) {
+      fail('recentStudents', err);
+      recentStudentsProgress = recentStudents.map(
+        () => ZERO_ASSIGNMENT_PROGRESS,
+      );
+    }
+
     // Every single query failing is not a degraded page, it is an outage —
     // report it rather than rendering a dashboard of confident zeroes.
     if (settled.every((result) => result.status === 'rejected')) {
@@ -402,17 +578,21 @@ export class CoordinatorService {
         studentCount: e._count.students,
       })),
       recentStudents: recentStudents.map(
-        ({ attendances, user, establishment, ...student }) => ({
-          id: student.id,
-          studentIdNumber: student.studentIdNumber,
-          name: user.name,
-          course: student.course,
-          establishment: establishment?.name ?? null,
-          startDate: student.startDate,
-          requiredHours: student.requiredHours,
-          completedHours: totalHours(attendances),
-          status: student.status,
-        }),
+        ({ trainingAssignments, user, establishment, ...student }, index) => {
+          const progress = recentStudentsProgress[index];
+          return {
+            id: student.id,
+            studentIdNumber: student.studentIdNumber,
+            name: user.name,
+            course: student.course,
+            establishment: establishment?.name ?? null,
+            startDate: student.startDate,
+            hasActiveAssignment: trainingAssignments.length > 0,
+            requiredHours: progress.requiredHours,
+            completedHours: progress.approvedHours,
+            status: student.status,
+          };
+        },
       ),
     };
   }
@@ -567,9 +747,11 @@ export class CoordinatorService {
       });
     }
 
+    const resolved = await this.resolveCourseFields(data, student.courseId);
+
     return this.prisma.client.student.update({
       where: { id: studentId },
-      data: studentProfileData(data),
+      data: studentProfileData(resolved),
       include: {
         user: { select: { id: true, email: true, name: true } },
         establishment: { select: { id: true, name: true } },
@@ -751,6 +933,284 @@ export class CoordinatorService {
 
     return { id: supervisorId, deleted: true };
   }
+
+  /**
+   * A student's numeric year level, for matching against
+   * `CourseRequirement.yearLevel`. There is no dedicated column for this (see
+   * `resolveCourseFields`'s comment) — a Block is authoritative when one
+   * applies (it stores a real Int), so it is preferred; otherwise this falls
+   * back to parsing the deprecated `Student.yearLevel` free-text column, which
+   * `resolveCourseFields` writes as a clean digit string whenever
+   * `courseYearLevel` was used, making the parse reliable going forward. Older
+   * free text predating this step may still fail to parse — that is a `null`
+   * here, not a guess, and callers turn it into a 400.
+   */
+  private async resolveStudentYearLevel(
+    student: { yearLevel: string | null; blockId: string | null },
+    overrideBlockId?: string,
+  ): Promise<number | null> {
+    const blockId = overrideBlockId ?? student.blockId ?? undefined;
+    if (blockId) {
+      const block = await this.prisma.client.block.findUnique({
+        where: { id: blockId },
+        select: { yearLevel: true },
+      });
+      if (block) return block.yearLevel;
+    }
+    return parseYearLevel(student.yearLevel);
+  }
+
+  /**
+   * The CourseRequirement a placement would auto-fill from, so the coordinator
+   * can see it — and the establishment they are considering — before
+   * confirming. Record placement is meant to be one action (thesis rule): this
+   * is what lets the form show the hours pre-filled rather than making the
+   * coordinator hunt for the right number.
+   */
+  async getPlacementDefaults(studentId: string, establishmentId?: string) {
+    const student = await this.prisma.client.student.findUnique({
+      where: { id: studentId },
+      select: { id: true, courseId: true, blockId: true, yearLevel: true },
+    });
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+    if (!student.courseId) {
+      throw new BadRequestException(
+        'This student has no course set. Assign a course before recording a placement.',
+      );
+    }
+
+    const yearLevel = await this.resolveStudentYearLevel(student);
+    if (yearLevel === null) {
+      throw new BadRequestException(
+        'This student has no year level set. Assign a year level (or a block) before recording a placement.',
+      );
+    }
+
+    const requirement = await this.prisma.client.courseRequirement.findUnique({
+      where: { courseId_yearLevel: { courseId: student.courseId, yearLevel } },
+    });
+    if (!requirement) {
+      throw new BadRequestException(
+        `This course has no OJT requirement defined for year ${yearLevel}.`,
+      );
+    }
+
+    let establishment: {
+      id: string;
+      name: string;
+      status: string;
+    } | null = null;
+    if (establishmentId) {
+      establishment = await this.prisma.client.establishment.findUnique({
+        where: { id: establishmentId },
+        select: { id: true, name: true, status: true },
+      });
+      if (!establishment) {
+        throw new NotFoundException('Establishment not found');
+      }
+    }
+
+    return {
+      courseId: student.courseId,
+      yearLevel,
+      requirement: {
+        id: requirement.id,
+        yearLevel: requirement.yearLevel,
+        requiredHours: requirement.requiredHours,
+      },
+      requiredHours: requirement.requiredHours,
+      establishment,
+    };
+  }
+
+  /**
+   * Records a placement: one action that transfers the student's previous
+   * ACTIVE assignment (if any) out and creates a new one at zero hours.
+   *
+   * The previous assignment is never deleted or merged — it is marked
+   * TRANSFERRED with its `endDate` set to the new assignment's `startDate`,
+   * preserving its own hours and history exactly as the thesis requires.
+   */
+  async createPlacement(
+    studentId: string,
+    data: {
+      establishmentId: string;
+      dutyDays: Weekday[];
+      startDate: string;
+      academicYear: string;
+      requiredHours?: number;
+      blockId?: string;
+    },
+  ) {
+    const student = await this.prisma.client.student.findUnique({
+      where: { id: studentId },
+    });
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    const establishment = await this.prisma.client.establishment.findUnique({
+      where: { id: data.establishmentId },
+      select: { id: true, status: true },
+    });
+    if (!establishment) {
+      throw new NotFoundException('Establishment not found');
+    }
+    if (establishment.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'This establishment is inactive and cannot receive new placements.',
+      );
+    }
+
+    if (data.blockId) {
+      const block = await this.prisma.client.block.findUnique({
+        where: { id: data.blockId },
+        select: { id: true, courseId: true },
+      });
+      if (!block) {
+        throw new BadRequestException('blockId does not match a block');
+      }
+      if (student.courseId && block.courseId !== student.courseId) {
+        throw new BadRequestException(
+          "Block does not belong to the student's course",
+        );
+      }
+    }
+
+    const yearLevel = await this.resolveStudentYearLevel(student, data.blockId);
+    if (yearLevel === null) {
+      throw new BadRequestException(
+        'This student has no year level set. Assign a course/year level or a block before recording a placement.',
+      );
+    }
+
+    // requiredHours auto-fills from the matching CourseRequirement — the
+    // coordinator only confirms it (thesis rule) — but an explicit override is
+    // still honoured. Either way, the requirement is linked for traceability
+    // whenever one exists for this course/year, even when its hours were
+    // overridden.
+    const requirement = student.courseId
+      ? await this.prisma.client.courseRequirement.findUnique({
+          where: {
+            courseId_yearLevel: { courseId: student.courseId, yearLevel },
+          },
+        })
+      : null;
+    if (data.requiredHours === undefined && !requirement) {
+      throw new BadRequestException(
+        student.courseId
+          ? `This course has no OJT requirement defined for year ${yearLevel}.`
+          : 'This student has no course set. Assign a course, or provide requiredHours directly.',
+      );
+    }
+    const requiredHours = data.requiredHours ?? requirement!.requiredHours;
+
+    const startDate = startOfUtcDay(data.startDate);
+    if (Number.isNaN(startDate.getTime())) {
+      throw new BadRequestException('startDate is not a valid date');
+    }
+
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const activeAssignment = await tx.trainingAssignment.findFirst({
+        where: { studentId, status: 'ACTIVE' },
+      });
+      if (activeAssignment) {
+        await tx.trainingAssignment.update({
+          where: { id: activeAssignment.id },
+          data: { status: 'TRANSFERRED', endDate: startDate },
+        });
+      }
+
+      const created = await tx.trainingAssignment.create({
+        data: {
+          studentId,
+          establishmentId: data.establishmentId,
+          courseRequirementId: requirement?.id,
+          blockId: data.blockId,
+          yearLevel,
+          requiredHours,
+          dutyDays: data.dutyDays,
+          startDate,
+          academicYear: data.academicYear,
+          status: 'ACTIVE',
+        },
+      });
+
+      // Mirrored onto the deprecated Student fields so supervisor scoping
+      // (Student.establishmentId) and any screen still reading these directly
+      // keep working until they are migrated onto TrainingAssignment.
+      await tx.student.update({
+        where: { id: studentId },
+        data: {
+          establishmentId: data.establishmentId,
+          requiredHours,
+          startDate,
+          endDate: null,
+        },
+      });
+
+      return { created, progress: await computeProgress(tx, created.id) };
+    });
+
+    return { ...result.created, progress: result.progress };
+  }
+
+  /** Every assignment a student has ever had, newest first, with progress. */
+  async listAssignments(studentId: string) {
+    const student = await this.prisma.client.student.findUnique({
+      where: { id: studentId },
+      select: { id: true },
+    });
+    if (!student) {
+      throw new NotFoundException('Student not found');
+    }
+
+    const assignments = await this.prisma.client.trainingAssignment.findMany({
+      where: { studentId },
+      include: { establishment: { select: { id: true, name: true } } },
+      orderBy: { startDate: 'desc' },
+    });
+
+    return Promise.all(
+      assignments.map(async (assignment) => ({
+        ...assignment,
+        progress: await computeProgress(this.prisma.client, assignment.id),
+      })),
+    );
+  }
+
+  /**
+   * Edits an assignment in place: duty days, an early end date, or closing it
+   * out (COMPLETED/CANCELLED). Never TRANSFERRED here — that status only ever
+   * comes from `createPlacement` recording the next placement.
+   */
+  async updateAssignment(
+    assignmentId: string,
+    data: {
+      dutyDays?: Weekday[];
+      endDate?: string | null;
+      status?: 'COMPLETED' | 'CANCELLED';
+    },
+  ) {
+    const assignment = await this.prisma.client.trainingAssignment.findUnique({
+      where: { id: assignmentId },
+    });
+    if (!assignment) {
+      throw new NotFoundException('Training assignment not found');
+    }
+
+    return this.prisma.client.trainingAssignment.update({
+      where: { id: assignmentId },
+      data: {
+        dutyDays: data.dutyDays,
+        endDate: toNullableDate(data.endDate),
+        status: data.status,
+      },
+      include: { establishment: { select: { id: true, name: true } } },
+    });
+  }
 }
 
 const MS_PER_WEEK = 7 * MS_PER_DAY;
@@ -815,6 +1275,18 @@ function toNullableDate(value?: string | null): Date | null | undefined {
 }
 
 /**
+ * The first digit in a free-text year level ("4th Year" -> 4), matching the
+ * heuristic the `training_assignment_foundation` migration's backfill used —
+ * see `resolveCourseFields`'s comment for why this string is the only place a
+ * student's numeric year level can come from without a schema change.
+ */
+function parseYearLevel(value: string | null): number | null {
+  if (!value) return null;
+  const match = value.match(/\d/);
+  return match ? Number(match[0]) : null;
+}
+
+/**
  * Shared create/update fields. `school` is deliberately excluded — the school
  * is permanent (`SCHOOL_NAME`), never client-editable. `createStudent` sets it
  * explicitly; `updateStudent` never touches the column at all, so any
@@ -831,8 +1303,15 @@ function studentProfileData(data: StudentDetails) {
     dateOfBirth: toNullableDate(data.dateOfBirth),
     contactNumber: data.contactNumber,
     address: data.address,
+    // DEPRECATED, but still written: `resolveCourseFields` derives fresh
+    // values for both from courseId/blockId/courseYearLevel when those are
+    // sent, so screens still reading these two columns keep rendering
+    // something accurate. Unset by that call, `data.course`/`data.yearLevel`
+    // pass through as sent — the pre-existing free-text behavior.
     course: data.course,
     yearLevel: data.yearLevel,
+    courseId: data.courseId,
+    blockId: data.blockId,
     establishmentId: data.establishmentId,
     requiredHours: data.requiredHours,
     startDate: toNullableDate(data.startDate),

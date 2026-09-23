@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   Req,
   Res,
@@ -13,6 +14,9 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Response } from 'express';
 import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsDateString,
   IsEmail,
   IsIn,
@@ -42,6 +46,10 @@ import {
 const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{4,30}$/;
 const USERNAME_MESSAGE =
   'username must be 4-30 characters using letters, numbers, dot, underscore or hyphen (no "@")';
+
+const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
+const ACADEMIC_YEAR_PATTERN = /^\d{4}-\d{4}$/;
+const ACADEMIC_YEAR_MESSAGE = 'academicYear must look like "2025-2026"';
 
 class CreateSupervisorDto {
   @IsEmail()
@@ -141,6 +149,34 @@ class StudentDetailsDto {
   @MaxLength(30)
   yearLevel?: string | null;
 
+  // The structured counterparts to `course`/`yearLevel` above. When set, the
+  // service also derives fresh values for those two deprecated free-text
+  // columns (course name, and String(courseYearLevel)) so screens that still
+  // read them keep rendering something sensible — see
+  // `coordinator.service.ts`'s `studentProfileData`. Named `courseYearLevel`,
+  // not `yearLevel`, only because that name is already taken by the free-text
+  // field above; there is no separate stored column for it; it is folded into
+  // the deprecated `yearLevel` string and read back from there by
+  // `getPlacementDefaults`.
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @IsNotEmpty()
+  courseId?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @IsNotEmpty()
+  blockId?: string | null;
+
+  @IsOptional()
+  @ToNullableNumber()
+  @IsInt()
+  @Min(1)
+  @Max(10)
+  courseYearLevel?: number | null;
+
   // Clearing the establishment select unassigns the student — Student
   // .establishmentId is nullable for exactly that (see §8 item 17).
   @IsOptional()
@@ -217,6 +253,58 @@ class ReviewDocumentDto {
   @MinLength(3)
   @MaxLength(500)
   reviewNote?: string;
+}
+
+class CreatePlacementDto {
+  @IsString()
+  @IsNotEmpty()
+  establishmentId!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsIn(WEEKDAYS, { each: true })
+  dutyDays!: (typeof WEEKDAYS)[number][];
+
+  @IsDateString()
+  startDate!: string;
+
+  @Matches(ACADEMIC_YEAR_PATTERN, { message: ACADEMIC_YEAR_MESSAGE })
+  academicYear!: string;
+
+  // Defaults to the matching CourseRequirement's hours (see
+  // getPlacementDefaults) when omitted — this only overrides it.
+  @IsOptional()
+  @ToOptionalNumber()
+  @IsInt()
+  @Min(0)
+  requiredHours?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  blockId?: string;
+}
+
+class UpdateAssignmentDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsIn(WEEKDAYS, { each: true })
+  dutyDays?: (typeof WEEKDAYS)[number][];
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsDateString()
+  endDate?: string | null;
+
+  // Not TRANSFERRED — that status is only ever set by placing a new
+  // assignment (createPlacement), never directly, so the previous placement
+  // and the new one always change together.
+  @IsOptional()
+  @IsIn(['COMPLETED', 'CANCELLED'])
+  status?: 'COMPLETED' | 'CANCELLED';
 }
 
 @Controller('coordinator')
@@ -309,6 +397,29 @@ export class CoordinatorController {
   @Delete('students/:id')
   removeStudent(@Param('id') id: string) {
     return this.coordinatorService.removeStudent(id);
+  }
+
+  @Get('students/:id/placement-defaults')
+  getPlacementDefaults(
+    @Param('id') id: string,
+    @Query('establishmentId') establishmentId?: string,
+  ) {
+    return this.coordinatorService.getPlacementDefaults(id, establishmentId);
+  }
+
+  @Post('students/:id/placements')
+  createPlacement(@Param('id') id: string, @Body() dto: CreatePlacementDto) {
+    return this.coordinatorService.createPlacement(id, dto);
+  }
+
+  @Get('students/:id/assignments')
+  listAssignments(@Param('id') id: string) {
+    return this.coordinatorService.listAssignments(id);
+  }
+
+  @Patch('assignments/:id')
+  updateAssignment(@Param('id') id: string, @Body() dto: UpdateAssignmentDto) {
+    return this.coordinatorService.updateAssignment(id, dto);
   }
 
   // Recovery for a forgotten password. No current password required — see

@@ -63,6 +63,17 @@ export interface SupervisorStudent {
   startDate: string | null;
   endDate: string | null;
   user: { id: string; email: string; name: string };
+  /**
+   * The TrainingAssignment this row's hours/progress are drawn from — always
+   * one at THIS establishment, never the student's current one elsewhere.
+   * `assignmentStatus` is "ACTIVE" for a currently placed student, or
+   * TRANSFERRED/COMPLETED for one who has moved on but still has PENDING
+   * attendance stranded here awaiting approval (the only reason a non-ACTIVE
+   * student still appears in this list at all).
+   */
+  assignmentId: string;
+  assignmentStatus: "ACTIVE" | "COMPLETED" | "TRANSFERRED" | "CANCELLED";
+  hasActiveAssignment: boolean;
 }
 
 export const supervisorApi = createApi({

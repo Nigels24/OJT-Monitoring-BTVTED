@@ -36,6 +36,23 @@ enum EstablishmentStatus {
   INACTIVE
 }
 
+enum Weekday {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  COMPLETED
+  TRANSFERRED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -48,6 +65,12 @@ model User {
   name      String
   role      Role
   createdAt DateTime @default(now())
+
+  // Forces a password change on next login. Defaults true so every account
+  // the coordinator issues from now on is born in that state; the migration
+  // that added this column backfills every user that already existed to
+  // false, so nobody already signed in gets locked into a forced change.
+  mustChangePassword Boolean @default(true)
 
   studentProfile     Student?
   supervisorProfile  Supervisor?
@@ -81,6 +104,8 @@ model Establishment {
 
   supervisors Supervisor[]
   students    Student[]
+
+  trainingAssignments TrainingAssignment[]
 }
 
 model Supervisor {
@@ -101,19 +126,138 @@ model Coordinator {
   user   User   @relation(fields: [userId], references: [id])
 
   reviewedDocuments Document[]
+  blocks            Block[]
+  gradedAssignments TrainingAssignment[]
+}
+
+/// A degree program that places students in OJT, e.g. "BTVTED-CHS".
+/// Required hours are NOT stored here — they vary by year level, so they
+/// live on CourseRequirement. `code` is the short identifier coordinators
+/// pick from when creating a block or assignment.
+model Course {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requirements CourseRequirement[]
+  blocks       Block[]
+  students     Student[]
+}
+
+/// How many OJT hours a course requires at a given year level. A program can
+/// require OJT at more than one year level (e.g. a 3rd-year practicum and a
+/// 4th-year internship), hence the (courseId, yearLevel) pair rather than a
+/// single requiredHours column on Course.
+model CourseRequirement {
+  id            String   @id @default(cuid())
+  courseId      String
+  course        Course   @relation(fields: [courseId], references: [id])
+  yearLevel     Int
+  requiredHours Int
+  createdAt     DateTime @default(now())
+
+  trainingAssignments TrainingAssignment[]
+
+  @@unique([courseId, yearLevel])
+}
+
+/// One cohort of students in a course/year level for one academic year, e.g.
+/// "Block A" of BTVTED-CHS 4th year, 2025-2026. `coordinatorId` is the
+/// coordinator who owns/advises the block and is nullable because a block can
+/// exist before one is assigned.
+model Block {
+  id            String       @id @default(cuid())
+  courseId      String
+  course        Course       @relation(fields: [courseId], references: [id])
+  yearLevel     Int
+  name          String
+  coordinatorId String?
+  coordinator   Coordinator? @relation(fields: [coordinatorId], references: [id])
+  academicYear  String
+  createdAt     DateTime     @default(now())
+
+  students            Student[]
+  trainingAssignments TrainingAssignment[]
+
+  @@unique([courseId, yearLevel, name, academicYear])
+}
+
+/// One deployment of a student to an establishment. Attendance, Documents and
+/// Evaluations attach here (via a nullable trainingAssignmentId, so existing
+/// rows survive the migration unattributed until backfilled), not directly to
+/// Student, because a student can be reassigned: reassignment ends this row
+/// (status TRANSFERRED) and creates a new one starting at zero hours, rather
+/// than mutating establishmentId/startDate in place and losing the history of
+/// the first placement.
+///
+/// `requiredHours` is copied from CourseRequirement at creation, not read
+/// live through `courseRequirementId` — a later change to the program's
+/// requirement must not retroactively change what an in-progress or
+/// already-completed assignment owes.
+model TrainingAssignment {
+  id                  String             @id @default(cuid())
+  studentId           String
+  student             Student            @relation(fields: [studentId], references: [id])
+  establishmentId     String
+  establishment       Establishment      @relation(fields: [establishmentId], references: [id])
+  courseRequirementId String?
+  courseRequirement   CourseRequirement? @relation(fields: [courseRequirementId], references: [id])
+  blockId             String?
+  block               Block?             @relation(fields: [blockId], references: [id])
+  yearLevel           Int
+  requiredHours       Int
+  dutyDays            Weekday[]
+  startDate           DateTime
+  endDate             DateTime?
+  academicYear        String
+  status              AssignmentStatus   @default(ACTIVE)
+
+  // Set by the coordinator once, after the assignment ends. Separate from the
+  // supervisor's per-sheet Evaluation.totalRating — this is the coordinator's
+  // own final grade for the whole placement, not a rubric score.
+  coordinatorGrade        Decimal?     @db.Decimal(5, 2)
+  coordinatorGradeRemarks String?
+  gradedById              String?
+  gradedBy                Coordinator? @relation(fields: [gradedById], references: [id])
+  gradedAt                DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attendances Attendance[]
+  documents   Document[]
+  evaluations Evaluation[]
+
+  @@index([studentId, status])
 }
 
 model Student {
-  id              String         @id @default(cuid())
-  userId          String         @unique
-  user            User           @relation(fields: [userId], references: [id])
-  studentIdNumber String         @unique
+  id              String @id @default(cuid())
+  userId          String @unique
+  user            User   @relation(fields: [userId], references: [id])
+  studentIdNumber String @unique
+
+  // DEPRECATED - read from active TrainingAssignment. Kept, and still
+  // written by the existing student-management flow, until the
+  // controllers/services in the next step are moved onto TrainingAssignment.
   course          String?
   establishmentId String?
   establishment   Establishment? @relation(fields: [establishmentId], references: [id])
   requiredHours   Int            @default(0)
   startDate       DateTime?
+  endDate         DateTime?
+  yearLevel       String?
   status          StudentStatus  @default(ACTIVE)
+
+  // Named `enrolledCourse`, not `course`, because the deprecated free-text
+  // `course` field above already owns that name.
+  courseId       String?
+  enrolledCourse Course? @relation(fields: [courseId], references: [id])
+  blockId        String?
+  block          Block?  @relation(fields: [blockId], references: [id])
 
   // Personal details captured by the coordinator's student form. All nullable
   // because every student created before this migration has none of them.
@@ -127,14 +271,13 @@ model Student {
   school        String?
   contactNumber String?
   address       String?
-  yearLevel     String?
   gender        String?
-  endDate       DateTime?
 
-  attendances Attendance[]
-  documents   Document[]
-  credentials Credential[]
-  evaluations Evaluation[]
+  attendances         Attendance[]
+  documents           Document[]
+  credentials         Credential[]
+  evaluations         Evaluation[]
+  trainingAssignments TrainingAssignment[]
 }
 
 model Attendance {
@@ -157,6 +300,12 @@ model Attendance {
   approvedById String?
   approvedBy   Supervisor? @relation("ApprovedBy", fields: [approvedById], references: [id])
 
+  // Nullable: rows written before this migration have no assignment to point
+  // at and stay NULL until the backfill (or forever, for a student who never
+  // had an establishment). See TrainingAssignment's doc comment.
+  trainingAssignmentId String?
+  trainingAssignment   TrainingAssignment? @relation(fields: [trainingAssignmentId], references: [id])
+
   createdAt DateTime @default(now())
 
   // One log per student per day. Without this a student can submit the same
@@ -164,6 +313,7 @@ model Attendance {
   // `date` is normalised to UTC midnight on write (see StudentService), which
   // is what makes the constraint meaningful.
   @@unique([studentId, date])
+  @@index([trainingAssignmentId])
 }
 
 model Document {
@@ -183,7 +333,12 @@ model Document {
   reviewNote   String?
   reviewedAt   DateTime?
 
+  trainingAssignmentId String?
+  trainingAssignment   TrainingAssignment? @relation(fields: [trainingAssignmentId], references: [id])
+
   uploadedAt DateTime @default(now())
+
+  @@index([trainingAssignmentId])
 }
 
 model Credential {
@@ -243,8 +398,13 @@ model Evaluation {
   comments        String?
   recommendations String?
 
+  trainingAssignmentId String?
+  trainingAssignment   TrainingAssignment? @relation(fields: [trainingAssignmentId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([trainingAssignmentId])
 }
 
 /// One version of the school's evaluation sheet.

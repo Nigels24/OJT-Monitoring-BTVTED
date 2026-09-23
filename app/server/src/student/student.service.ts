@@ -7,13 +7,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { hoursForAttendance, totalHours } from '../common/attendance-hours';
+import { hoursForAttendance } from '../common/attendance-hours';
 import {
   formatDateOnly,
   manilaToday,
   startOfUtcDay,
   toUtcDateOnly,
 } from '../common/dates';
+import {
+  computeProgress,
+  WEEKDAY_BY_JS_DAY,
+  ZERO_ASSIGNMENT_PROGRESS,
+} from '../common/assignment-progress';
 import {
   buildObjectPath,
   deleteFile,
@@ -133,7 +138,17 @@ export class StudentService {
             coordinatorEmail: true,
           },
         },
+        // All-time, across every assignment the student has ever had — this
+        // is a raw activity log, not a progress figure, so it is left
+        // unscoped. The hour/progress figures below are scoped to the ACTIVE
+        // assignment only, per-assignment, the same as every other progress
+        // figure in the app now is.
         attendances: { orderBy: { date: 'desc' } },
+        trainingAssignments: {
+          where: { status: 'ACTIVE' },
+          take: 1,
+          select: { id: true },
+        },
         _count: { select: { documents: true, credentials: true } },
       },
     });
@@ -141,26 +156,28 @@ export class StudentService {
       throw new NotFoundException('Student profile not found');
     }
 
-    const { attendances, ...profile } = student;
-    const approved = attendances.filter((a) => a.status === 'APPROVED');
+    const { attendances, trainingAssignments, ...profile } = student;
+    const activeAssignment = trainingAssignments[0] ?? null;
+    // Zeroed, with the flag below, rather than crashing — a student between
+    // placements (or never yet placed) still has a dashboard to load.
+    const progress = activeAssignment
+      ? await computeProgress(this.prisma.client, activeAssignment.id)
+      : ZERO_ASSIGNMENT_PROGRESS;
 
     return {
       ...profile,
       stats: {
-        // Only approved attendance counts toward the requirement, which is
-        // why this can be lower than the sum of everything submitted.
-        completedHours: totalHours(approved),
-        pendingHours: totalHours(
-          attendances.filter((a) => a.status === 'PENDING'),
-        ),
-        requiredHours: student.requiredHours,
-        remainingHours: Math.max(
-          0,
-          Math.round((student.requiredHours - totalHours(approved)) * 100) /
-            100,
-        ),
+        hasActiveAssignment: activeAssignment !== null,
+        completedHours: progress.approvedHours,
+        pendingHours: progress.pendingHours,
+        requiredHours: progress.requiredHours,
+        remainingHours: progress.remainingHours,
+        percentComplete: progress.percentComplete,
+        expectedDutyDaysToDate: progress.expectedDutyDaysToDate,
+        daysWithApprovedAttendance: progress.daysWithApprovedAttendance,
         totalLogs: attendances.length,
-        approvedCount: approved.length,
+        approvedCount: attendances.filter((a) => a.status === 'APPROVED')
+          .length,
         pendingCount: attendances.filter((a) => a.status === 'PENDING').length,
         declinedCount: attendances.filter((a) => a.status === 'DECLINED')
           .length,
@@ -198,30 +215,68 @@ export class StudentService {
       );
     }
 
-    // The submitted date must not be before the student's OJT start, and
-    // never in the future — compared as calendar dates, never timestamps,
-    // against Manila's calendar day rather than the server's (the server may
-    // run in UTC, where an early-morning Manila (UTC+8) submission can
-    // already be "tomorrow" while the server still reads "today").
-    //
-    // Two independent checks, not one combined range: startDate and "today"
-    // can legitimately be inconsistent with each other (e.g. an OJT period
-    // that hasn't started yet has startDate > today), so a single
-    // "between X and Y" message can render as an inverted, nonsensical range.
-    // Each bound gets its own message instead.
-    const today = manilaToday();
-    const lowerBound = student.startDate
-      ? toUtcDateOnly(student.startDate)
-      : null;
+    // The stricter, TrainingAssignment-based version of the check above:
+    // `establishmentId` is mirrored from the ACTIVE assignment at placement
+    // time (CoordinatorService.createPlacement) but is not cleared when an
+    // assignment is later marked COMPLETED/CANCELLED via
+    // PATCH /coordinator/assignments/:id — a student can fail this even while
+    // the check above passes, and every new attendance row needs a live
+    // assignment to attach to regardless.
+    const activeAssignment =
+      await this.prisma.client.trainingAssignment.findFirst({
+        where: { studentId: student.id, status: 'ACTIVE' },
+      });
+    if (!activeAssignment) {
+      throw new BadRequestException('You have no active training placement.');
+    }
 
-    if (lowerBound && date.getTime() < lowerBound.getTime()) {
+    // The submitted date must fall within the ACTIVE assignment's own
+    // window, not the deprecated Student.startDate/endDate mirror: the
+    // mirror is only ever written at placement time
+    // (CoordinatorService.createPlacement) and never updated again, while
+    // `endDate` on the assignment itself CAN change afterwards
+    // (PATCH /coordinator/assignments/:id) — checking the live assignment is
+    // the only way an early end date actually stops new logging.
+    //
+    // Compared as calendar dates, never timestamps, against Manila's
+    // calendar day rather than the server's (the server may run in UTC,
+    // where an early-morning Manila (UTC+8) submission can already be
+    // "tomorrow" while the server still reads "today"). Each bound gets its
+    // own message — a combined "between X and Y" range reads as inverted
+    // nonsense when, e.g., an OJT period that hasn't started yet has
+    // startDate > today.
+    const today = manilaToday();
+    const assignmentStart = toUtcDateOnly(activeAssignment.startDate);
+    if (date.getTime() < assignmentStart.getTime()) {
       throw new BadRequestException(
-        `Your OJT period starts on ${formatDateOnly(lowerBound)}. You cannot log attendance before then.`,
+        `Your current placement starts on ${formatDateOnly(assignmentStart)}. You cannot log attendance before then.`,
       );
+    }
+    if (activeAssignment.endDate) {
+      const assignmentEnd = toUtcDateOnly(activeAssignment.endDate);
+      if (date.getTime() >= assignmentEnd.getTime()) {
+        throw new BadRequestException(
+          `Your current placement ended on ${formatDateOnly(assignmentEnd)}. You cannot log attendance on or after then.`,
+        );
+      }
     }
     if (date.getTime() > today.getTime()) {
       throw new BadRequestException(
         'Attendance cannot be logged for a future date.',
+      );
+    }
+
+    // Non-duty days are excluded from attendance (thesis rule): a Wed-Fri
+    // assignment is never "absent" on Mon/Tue, so those days are not
+    // loggable at all, not merely unpenalised.
+    const submittedWeekday = WEEKDAY_BY_JS_DAY[date.getUTCDay()];
+    if (!activeAssignment.dutyDays.includes(submittedWeekday)) {
+      const scheduled = [...activeAssignment.dutyDays]
+        .sort((a, b) => WEEK_ORDER.indexOf(a) - WEEK_ORDER.indexOf(b))
+        .map((day) => WEEKDAY_LABELS[day])
+        .join(', ');
+      throw new BadRequestException(
+        `${WEEKDAY_LABELS[submittedWeekday]} is not one of your scheduled duty days (${scheduled}).`,
       );
     }
 
@@ -287,6 +342,11 @@ export class StudentService {
             status: 'PENDING',
             declineReason: null,
             approvedById: null,
+            // A DECLINED row being corrected back to PENDING is re-pointed at
+            // whichever assignment is ACTIVE now, matching a fresh create —
+            // it may not be the one it was originally logged against if the
+            // student was reassigned in between.
+            trainingAssignmentId: activeAssignment.id,
           },
         })
       : await this.prisma.client.attendance.create({
@@ -296,6 +356,7 @@ export class StudentService {
             ...times,
             remarks: data.remarks,
             status: 'PENDING',
+            trainingAssignmentId: activeAssignment.id,
           },
         });
 
@@ -341,6 +402,16 @@ export class StudentService {
     const student = await this.getStudentByUserId(userId);
     assertValidDocumentFile(file);
 
+    // Nullable, and deliberately not required: the thesis has students
+    // uploading an application letter/resume BEFORE they are placed anywhere,
+    // so a document must still be uploadable with no ACTIVE assignment to
+    // attach to.
+    const activeAssignment =
+      await this.prisma.client.trainingAssignment.findFirst({
+        where: { studentId: student.id, status: 'ACTIVE' },
+        select: { id: true },
+      });
+
     const path = buildObjectPath('documents', student.id, file.originalname);
     await uploadFile(path, file.buffer, file.mimetype);
 
@@ -350,6 +421,7 @@ export class StudentService {
         name: data.name,
         fileUrl: path,
         status: 'PENDING',
+        trainingAssignmentId: activeAssignment?.id,
       },
     });
 
@@ -485,6 +557,19 @@ export async function withSignedUrl<T extends { fileUrl: string }>(
 
 /** Module-scope: `withSignedUrl` is a free function, not part of the service. */
 const storageLogger = new Logger('StorageSignedUrl');
+
+/** Canonical Mon-first week order, for sorting `dutyDays` into a readable message. */
+const WEEK_ORDER = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
+
+const WEEKDAY_LABELS: Record<string, string> = {
+  MON: 'Mon',
+  TUE: 'Tue',
+  WED: 'Wed',
+  THU: 'Thu',
+  FRI: 'Fri',
+  SAT: 'Sat',
+  SUN: 'Sun',
+};
 
 function assertValidDocumentFile(
   file: Express.Multer.File | undefined,

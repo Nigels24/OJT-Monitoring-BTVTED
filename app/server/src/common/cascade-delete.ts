@@ -87,6 +87,12 @@ export async function deleteStudentCascade(
     where: { evaluation: { studentId } },
   });
   await tx.evaluation.deleteMany({ where: { studentId } });
+  // TrainingAssignment.studentId is onDelete: Restrict, so this must run
+  // before tx.student.delete below or that delete aborts on a leftover row.
+  // Deleting the student is an explicit full removal — their assignments
+  // (and the history on them) go with them, unlike an establishment removal,
+  // which preserves assignments (see EstablishmentService.remove).
+  await tx.trainingAssignment.deleteMany({ where: { studentId } });
 
   await deleteMessagingFootprint(tx, userId);
 

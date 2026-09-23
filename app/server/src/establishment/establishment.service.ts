@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CASCADE_TRANSACTION_OPTIONS,
@@ -86,6 +90,12 @@ export class EstablishmentService {
    * - students are **not** deleted. Removing a placement doesn't remove the
    *   trainee, so `establishmentId` is nulled and they can be reassigned —
    *   which is what that column being nullable is for.
+   *
+   * TrainingAssignment.establishmentId is `onDelete: Restrict`, and unlike
+   * the student/supervisor cases above, that restriction is left standing on
+   * purpose here: the thesis requires completed training records to be
+   * preserved, so an establishment with any assignment on it (in progress or
+   * finished) cannot be deleted at all. Deactivate it instead.
    */
   async remove(id: string) {
     const establishment = await this.prisma.client.establishment.findUnique({
@@ -98,6 +108,17 @@ export class EstablishmentService {
     }
 
     await this.prisma.client.$transaction(async (tx) => {
+      // Checked first and inside the transaction: an assignment created
+      // between an outside lookup and this delete must still block it.
+      const assignmentCount = await tx.trainingAssignment.count({
+        where: { establishmentId: id },
+      });
+      if (assignmentCount > 0) {
+        throw new ConflictException(
+          `This establishment has ${assignmentCount} training assignment record(s) and cannot be deleted. Set it to Inactive instead to preserve trainee history.`,
+        );
+      }
+
       // Read inside the transaction: a supervisor created between an outside
       // lookup and this delete would be left pointing at a dead row.
       const supervisors = await tx.supervisor.findMany({
