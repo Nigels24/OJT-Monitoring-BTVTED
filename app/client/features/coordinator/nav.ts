@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  BookOpen,
   Building2,
   UserCog,
   Users,
@@ -17,6 +18,7 @@ import {
  */
 export const COORDINATOR_NAV = [
   { label: "Dashboard", href: "/coordinator/dashboard", icon: LayoutDashboard },
+  { label: "Course Management", href: "/coordinator/courses", icon: BookOpen },
   {
     label: "Establishment Management",
     href: "/coordinator/establishments",

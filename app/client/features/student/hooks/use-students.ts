@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useGetStudentsQuery,
   useCreateStudentMutation,
@@ -8,24 +9,12 @@ import {
   StudentStatus,
 } from "@/lib/api/studentApi";
 import { useGetEstablishmentsQuery } from "@/lib/api/establishmentApi";
+import {
+  useGetBlocksQuery,
+  useGetCoursesQuery,
+  useGetMyBlocksQuery,
+} from "@/lib/api/courseApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
-
-export const COURSE_OPTIONS = [
-  "BS Information Technology",
-  "BS Computer Science",
-  "BS Accountancy",
-  "BS Business Administration",
-  "BS Hospitality Management",
-  "BS Tourism Management",
-  "Associate in Computer Science",
-];
-
-export const YEAR_LEVEL_OPTIONS = [
-  "1st Year",
-  "2nd Year",
-  "3rd Year",
-  "4th Year",
-];
 
 export const STATUS_OPTIONS: StudentStatus[] = [
   "ACTIVE",
@@ -46,8 +35,9 @@ const EMPTY_FORM = {
   dateOfBirth: "",
   contactNumber: "",
   address: "",
-  course: "",
-  yearLevel: "",
+  courseId: "",
+  courseYearLevel: "",
+  blockId: "",
   establishmentId: "",
   requiredHours: "",
   startDate: "",
@@ -58,7 +48,66 @@ export type StudentForm = typeof EMPTY_FORM;
 
 const PAGE_SIZE = 5;
 
+/**
+ * The roster's scope and filters, persisted in the URL query string rather
+ * than component state — a bookmarked or shared link (or a page refresh)
+ * reopens the same "My Block" / "All Program" view and filter combination
+ * instead of always resetting to the default.
+ */
+function useRosterUrlState() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // "block" is the default and is never written to the URL, so the common
+  // case keeps a clean /students URL.
+  const scope: "block" | "all" =
+    searchParams.get("scope") === "all" ? "all" : "block";
+  const courseId = searchParams.get("courseId") ?? "";
+  const yearLevel = searchParams.get("yearLevel") ?? "";
+  const blockId = searchParams.get("blockId") ?? "";
+  const academicYear = searchParams.get("academicYear") ?? "";
+  const status = searchParams.get("status") ?? "";
+
+  const setParam = useCallback(
+    (key: string, value: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (value) params.set(key, value);
+      else params.delete(key);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
+
+  return {
+    scope,
+    courseId,
+    yearLevel,
+    blockId,
+    academicYear,
+    status,
+    setScope: (value: "block" | "all") =>
+      setParam("scope", value === "all" ? "all" : ""),
+    setCourseId: (value: string) => {
+      setParam("courseId", value);
+      // A course change invalidates whatever year level/block was picked
+      // for the old one.
+      setParam("yearLevel", "");
+      setParam("blockId", "");
+    },
+    setYearLevel: (value: string) => {
+      setParam("yearLevel", value);
+      setParam("blockId", "");
+    },
+    setBlockId: (value: string) => setParam("blockId", value),
+    setAcademicYear: (value: string) => setParam("academicYear", value),
+    setStatus: (value: string) => setParam("status", value),
+  };
+}
+
 export function useStudents() {
+  const roster = useRosterUrlState();
   const [form, setForm] = useState<StudentForm>(EMPTY_FORM);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
@@ -66,22 +115,93 @@ export function useStudents() {
   const [editTarget, setEditTarget] = useState<Student | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StudentStatus | "">("");
   const [page, setPage] = useState(1);
 
   const { showSuccess, showError } = useSnackbar();
 
-  const { data: students, isLoading } = useGetStudentsQuery();
+  const queryParams = useMemo(
+    () => ({
+      scope: roster.scope,
+      courseId: roster.courseId || undefined,
+      yearLevel: roster.yearLevel ? Number(roster.yearLevel) : undefined,
+      blockId: roster.blockId || undefined,
+      academicYear: roster.academicYear || undefined,
+      status: (roster.status || undefined) as StudentStatus | undefined,
+    }),
+    [
+      roster.scope,
+      roster.courseId,
+      roster.yearLevel,
+      roster.blockId,
+      roster.academicYear,
+      roster.status,
+    ],
+  );
+
+  const { data, isLoading } = useGetStudentsQuery(queryParams);
+  // Memoized: an inline `data?.students ?? []` would hand the `filtered`/
+  // `stats` useMemos below a fresh `[]` identity on every render data is
+  // absent, defeating their own memoization.
+  const students = useMemo(() => data?.students ?? [], [data]);
+  const noBlocksAssigned = data?.noBlocksAssigned ?? false;
+
   const { data: establishments } = useGetEstablishmentsQuery();
+  const { data: courses } = useGetCoursesQuery();
+  // Used only to decide whether the "My Block" scope has anything to show —
+  // an empty list here is what the toggle's disabled tooltip explains.
+  const { data: myBlocks } = useGetMyBlocksQuery();
+  // Options for the filter bar's own Block select, narrowed by whichever of
+  // course/year level/academic year are already picked.
+  const { data: filterBlocks } = useGetBlocksQuery(
+    {
+      courseId: roster.courseId || undefined,
+      yearLevel: roster.yearLevel ? Number(roster.yearLevel) : undefined,
+      academicYear: roster.academicYear || undefined,
+    },
+    { skip: !roster.courseId },
+  );
+
   const [createStudent, { isLoading: isCreating }] = useCreateStudentMutation();
   const [updateStudent, { isLoading: isUpdating }] = useUpdateStudentMutation();
   const [deleteStudent] = useDeleteStudentMutation();
+
+  // The form's own Course -> Year Level -> Block cascade (independent of the
+  // roster filter bar's course/year/block above).
+  const activeCourses = useMemo(
+    () => (courses ?? []).filter((c) => c.isActive),
+    [courses],
+  );
+  const formCourse = useMemo(
+    () => (courses ?? []).find((c) => c.id === form.courseId) ?? null,
+    [courses, form.courseId],
+  );
+  const formYearLevelOptions = useMemo(
+    () =>
+      (formCourse?.requirements ?? [])
+        .map((r) => r.yearLevel)
+        .sort((a, b) => a - b),
+    [formCourse],
+  );
+  const { data: formBlocks } = useGetBlocksQuery(
+    {
+      courseId: form.courseId || undefined,
+      yearLevel: form.courseYearLevel ? Number(form.courseYearLevel) : undefined,
+    },
+    { skip: !form.courseId || !form.courseYearLevel },
+  );
 
   const setField =
     (key: keyof StudentForm) =>
     (e: { target: { value: string } }) => {
       setForm((f) => ({ ...f, [key]: e.target.value }));
     };
+
+  const setCourseField = (value: string) => {
+    setForm((f) => ({ ...f, courseId: value, courseYearLevel: "", blockId: "" }));
+  };
+  const setYearLevelField = (value: string) => {
+    setForm((f) => ({ ...f, courseYearLevel: value, blockId: "" }));
+  };
 
   /**
    * Blanks go as `null` so an emptied box actually clears the column — the
@@ -101,8 +221,9 @@ export function useStudents() {
       : null,
     contactNumber: form.contactNumber || null,
     address: form.address || null,
-    course: form.course || null,
-    yearLevel: form.yearLevel || null,
+    courseId: form.courseId || null,
+    blockId: form.blockId || null,
+    courseYearLevel: form.courseYearLevel ? Number(form.courseYearLevel) : null,
     establishmentId: form.establishmentId || null,
     requiredHours: form.requiredHours ? Number(form.requiredHours) : undefined,
     startDate: form.startDate ? new Date(form.startDate).toISOString() : null,
@@ -178,8 +299,12 @@ export function useStudents() {
       dateOfBirth: student.dateOfBirth ? student.dateOfBirth.slice(0, 10) : "",
       contactNumber: student.contactNumber ?? "",
       address: student.address ?? "",
-      course: student.course ?? "",
-      yearLevel: student.yearLevel ?? "",
+      courseId: student.courseId ?? "",
+      // There is no stored numeric year level to read back (see
+      // `courseYearLevel`'s comment) — left blank on edit even for a student
+      // already on a course; the coordinator re-picks it if it needs changing.
+      courseYearLevel: "",
+      blockId: student.blockId ?? "",
       establishmentId: student.establishmentId ?? "",
       requiredHours: student.requiredHours?.toString() ?? "",
       startDate: student.startDate ? student.startDate.slice(0, 10) : "",
@@ -204,8 +329,7 @@ export function useStudents() {
 
   const filtered = useMemo(() => {
     const term = search.toLowerCase();
-    return (students ?? []).filter((s) => {
-      const matchesStatus = !statusFilter || s.status === statusFilter;
+    return students.filter((s) => {
       const haystack = [
         s.studentIdNumber,
         s.user.name,
@@ -216,22 +340,21 @@ export function useStudents() {
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      return matchesStatus && haystack.includes(term);
+      return haystack.includes(term);
     });
-  }, [students, search, statusFilter]);
+  }, [students, search]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const stats = useMemo(() => {
-    const all = students ?? [];
     return {
-      total: all.length,
-      active: all.filter((s) => s.status === "ACTIVE").length,
-      inProgress: all.filter(
+      total: students.length,
+      active: students.filter((s) => s.status === "ACTIVE").length,
+      inProgress: students.filter(
         (s) => s.requiredHours > 0 && s.completedHours < s.requiredHours,
       ).length,
-      completed: all.filter((s) => s.status === "COMPLETED").length,
+      completed: students.filter((s) => s.status === "COMPLETED").length,
     };
   }, [students]);
 
@@ -248,20 +371,27 @@ export function useStudents() {
     editTarget,
     isDialogOpen,
     search,
-    statusFilter,
     page,
     paged,
     totalPages,
     filtered,
     stats,
 
-    COURSE_OPTIONS,
-    YEAR_LEVEL_OPTIONS,
+    // Roster scope/filters (URL-persisted).
+    roster,
+    noBlocksAssigned,
+    hasOwnBlocks: (myBlocks ?? []).length > 0,
+    courses: activeCourses,
+    filterBlocks: filterBlocks ?? [],
+
     STATUS_OPTIONS,
+    formYearLevelOptions,
+    formBlocks: formBlocks ?? [],
 
     setField,
+    setCourseField,
+    setYearLevelField,
     setSearch,
-    setStatusFilter,
     setPage,
     setDeleteTarget,
     setViewTarget,

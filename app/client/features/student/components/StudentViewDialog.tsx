@@ -9,24 +9,29 @@ import {
   Clock,
   CalendarDays,
   FileText,
+  Briefcase,
 } from "lucide-react";
 import ViewDialog from "@/components/ui/ViewDialog";
 import DetailItem from "@/components/ui/DetailItem";
 import ProgressBar from "@/components/ui/ProgressBar";
+import Button from "@/components/ui/Button";
 import { Student } from "@/lib/api/studentApi";
 import { formatDateOnly } from "@/lib/format";
 import { SCHOOL_NAME } from "@/lib/school";
+import TrainingAssignmentsPanel from "./TrainingAssignmentsPanel";
 
 interface StudentViewDialogProps {
   open: boolean;
   student: Student | null;
   onClose: () => void;
+  onPlace?: (student: Student) => void;
 }
 
 export default function StudentViewDialog({
   open,
   student,
   onClose,
+  onPlace,
 }: StudentViewDialogProps) {
   return (
     <ViewDialog
@@ -137,6 +142,29 @@ export default function StudentViewDialog({
             <p className="text-xs text-gray-500 mt-2">
               Counts approved attendance only.
             </p>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base md:text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <Briefcase size={18} className="text-blue-600" />
+                Training Assignments
+              </h3>
+              {onPlace && (
+                <div className="w-44">
+                  <Button
+                    type="button"
+                    icon={MapPin}
+                    fullWidth={false}
+                    onClick={() => onPlace(student)}
+                    className="h-9! px-3! text-xs"
+                  >
+                    Record Placement
+                  </Button>
+                </div>
+              )}
+            </div>
+            <TrainingAssignmentsPanel studentId={student.id} />
           </div>
         </div>
       )}

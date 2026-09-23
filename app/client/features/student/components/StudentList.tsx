@@ -9,28 +9,26 @@ import {
   Users,
   FileText,
   KeyRound,
+  MapPin,
 } from "lucide-react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import ProgressBar from "@/components/ui/ProgressBar";
-import SelectField from "@/components/ui/SelectField";
 import StatusBadge, { BadgeVariant } from "@/components/ui/StatusBadge";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
 
 interface StudentListProps {
   isLoading: boolean;
   search: string;
-  statusFilter: StudentStatus | "";
   page: number;
   totalPages: number;
   paged: Student[];
-  statusOptions: StudentStatus[];
   onSearchChange: (value: string) => void;
-  onStatusFilterChange: (value: StudentStatus | "") => void;
   onPageChange: (page: number) => void;
   onView: (student: Student) => void;
   onEdit: (student: Student) => void;
   onDelete: (student: Student) => void;
   onResetPassword: (student: Student) => void;
+  onPlace: (student: Student) => void;
 }
 
 const STATUS_VARIANT: Record<StudentStatus, BadgeVariant> = {
@@ -50,18 +48,16 @@ const STATUS_LABEL: Record<StudentStatus, string> = {
 export default function StudentList({
   isLoading,
   search,
-  statusFilter,
   page,
   totalPages,
   paged,
-  statusOptions,
   onSearchChange,
-  onStatusFilterChange,
   onPageChange,
   onView,
   onEdit,
   onDelete,
   onResetPassword,
+  onPlace,
 }: StudentListProps) {
   // Seeded once from the prop. The parent's `search` is only ever changed by
   // the debounce below, so there is nothing to sync back the other way.
@@ -113,7 +109,12 @@ export default function StudentList({
     {
       key: "establishment",
       label: "Establishment",
-      render: (r) => r.establishment?.name || "Unassigned",
+      render: (r) =>
+        r.hasActiveAssignment ? (
+          r.establishment?.name || "Unassigned"
+        ) : (
+          <span className="text-gray-400 italic">Not placed</span>
+        ),
     },
     {
       key: "contactNumber",
@@ -123,26 +124,32 @@ export default function StudentList({
     {
       key: "hours",
       label: "Hours",
-      render: (r) => (
-        <span className="whitespace-nowrap">
-          {r.completedHours}/{r.requiredHours} hrs
-        </span>
-      ),
+      render: (r) =>
+        r.hasActiveAssignment ? (
+          <span className="whitespace-nowrap">
+            {r.completedHours}/{r.requiredHours} hrs
+          </span>
+        ) : (
+          "—"
+        ),
     },
     {
       key: "progress",
       label: "Progress",
-      render: (r) => (
-        <div className="min-w-28">
-          <ProgressBar
-            value={r.completedHours}
-            max={r.requiredHours || 1}
-            variant="thin"
-            showLabel
-            colorByValue
-          />
-        </div>
-      ),
+      render: (r) =>
+        r.hasActiveAssignment ? (
+          <div className="min-w-28">
+            <ProgressBar
+              value={r.completedHours}
+              max={r.requiredHours || 1}
+              variant="thin"
+              showLabel
+              colorByValue
+            />
+          </div>
+        ) : (
+          "—"
+        ),
     },
     {
       key: "credentials",
@@ -169,6 +176,14 @@ export default function StudentList({
       label: "Actions",
       render: (r) => (
         <div className="flex gap-1 md:gap-2">
+          <button
+            onClick={() => onPlace(r)}
+            className="p-1 md:p-1.5 rounded-md border border-green-200 text-green-600 hover:bg-green-50"
+            aria-label={`Record placement for ${r.user.name}`}
+            title="Record placement"
+          >
+            <MapPin size={14} />
+          </button>
           <button
             onClick={() => onView(r)}
             className="p-1 md:p-1.5 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50"
@@ -218,24 +233,6 @@ export default function StudentList({
             }}
             placeholder="Search by name, student ID, email, course, establishment..."
             className="w-full h-10 md:h-12 pl-9 md:pl-11 pr-3 md:pr-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-          />
-        </div>
-        <div className="md:w-56">
-          <SelectField
-            value={statusFilter}
-            onChange={(value) => {
-              onStatusFilterChange(value as StudentStatus | "");
-              onPageChange(1);
-            }}
-            placeholder="All Statuses"
-            options={[
-              { label: "All Statuses", value: "" },
-              ...statusOptions.map((s) => ({
-                label: STATUS_LABEL[s],
-                value: s,
-              })),
-            ]}
-            className="w-full"
           />
         </div>
       </div>

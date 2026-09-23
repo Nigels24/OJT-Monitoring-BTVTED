@@ -8,7 +8,11 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Weekday } from '../../generated/prisma/client';
+import type {
+  Prisma,
+  StudentStatus,
+  Weekday,
+} from '../../generated/prisma/client';
 import { totalHours } from '../common/attendance-hours';
 import { MS_PER_DAY, manilaToday, startOfUtcDay } from '../common/dates';
 import {
@@ -242,8 +246,70 @@ export class CoordinatorService {
     return result;
   }
 
-  async listStudents() {
+  /**
+   * The coordinator's student roster.
+   *
+   * `scope: 'block'` (the default) narrows this to the requesting
+   * coordinator's own blocks (Table 1: "a coordinator sees their own block's
+   * trainees by default and can switch to a program-wide view"). This is a
+   * view default, not an authorization boundary — every coordinator account
+   * can already reach every student through this same endpoint with
+   * `scope=all`, exactly like `getDashboard`/`getAttendanceOversight` are
+   * deliberately unscoped. A coordinator with no blocks assigned yet has
+   * nothing to narrow by, so this falls back to the full roster and says so
+   * via `noBlocksAssigned`, rather than silently returning an empty list that
+   * reads as "no students exist".
+   */
+  async listStudents(
+    userId: string,
+    filters: {
+      scope?: 'block' | 'all';
+      courseId?: string;
+      yearLevel?: number;
+      blockId?: string;
+      academicYear?: string;
+      status?: StudentStatus;
+    } = {},
+  ) {
+    const coordinator = await this.getCoordinatorByUserId(userId);
+
+    let blockScopeIds: string[] | null = null;
+    let noBlocksAssigned = false;
+    if (filters.scope !== 'all') {
+      const ownBlocks = await this.prisma.client.block.findMany({
+        where: { coordinatorId: coordinator.id },
+        select: { id: true },
+      });
+      if (ownBlocks.length > 0) {
+        blockScopeIds = ownBlocks.map((b) => b.id);
+      } else {
+        noBlocksAssigned = true;
+      }
+    }
+
+    const where: Prisma.StudentWhereInput = {
+      ...(blockScopeIds ? { blockId: { in: blockScopeIds } } : {}),
+      ...(filters.courseId ? { courseId: filters.courseId } : {}),
+      ...(filters.blockId ? { blockId: filters.blockId } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      // yearLevel/academicYear live on Block, not Student directly — a
+      // student not yet assigned to a block simply cannot match either.
+      ...(filters.yearLevel !== undefined || filters.academicYear
+        ? {
+            block: {
+              ...(filters.yearLevel !== undefined
+                ? { yearLevel: filters.yearLevel }
+                : {}),
+              ...(filters.academicYear
+                ? { academicYear: filters.academicYear }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
     const students = await this.prisma.client.student.findMany({
+      where,
       include: {
         user: {
           select: {
@@ -287,19 +353,52 @@ export class CoordinatorService {
 
     // `trainingAssignments` is only fetched to derive progress; drop it from
     // the response so the list payload stays small.
-    return students.map(({ trainingAssignments, ...student }, index) => {
-      const progress = progressByStudent[index];
-      return {
-        ...student,
-        hasActiveAssignment: trainingAssignments.length > 0,
-        // Kept at top level, not just inside `progress`, so the existing
-        // client types (studentApi.ts) that already read these two fields
-        // keep compiling unchanged — their values now come from the ACTIVE
-        // assignment instead of all-time attendance.
-        completedHours: progress.approvedHours,
-        requiredHours: progress.requiredHours,
-        progress,
-      };
+    return {
+      noBlocksAssigned,
+      students: students.map(({ trainingAssignments, ...student }, index) => {
+        const progress = progressByStudent[index];
+        return {
+          ...student,
+          hasActiveAssignment: trainingAssignments.length > 0,
+          // Kept at top level, not just inside `progress`, so the existing
+          // client types (studentApi.ts) that already read these two fields
+          // keep compiling unchanged — their values now come from the ACTIVE
+          // assignment instead of all-time attendance.
+          completedHours: progress.approvedHours,
+          requiredHours: progress.requiredHours,
+          progress,
+        };
+      }),
+    };
+  }
+
+  /** The requesting coordinator's own blocks — populates "My Block" filters. */
+  async getMyBlocks(userId: string) {
+    const coordinator = await this.getCoordinatorByUserId(userId);
+    return this.prisma.client.block.findMany({
+      where: { coordinatorId: coordinator.id },
+      include: {
+        course: { select: { id: true, code: true, name: true } },
+        coordinator: { select: { id: true, user: { select: { name: true } } } },
+        _count: { select: { students: true, trainingAssignments: true } },
+      },
+      orderBy: [{ academicYear: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  /**
+   * Every coordinator account, for the block form's "assigned coordinator"
+   * picker (Table 1: two blocks per year level, each with its own
+   * coordinator). Not asked for explicitly in the Step 3 handoff's backend
+   * list, but there is no other way to populate that select — `Block
+   * .coordinatorId` already accepts any coordinator's id
+   * (`CourseService.updateBlock`), there was just nothing listing the
+   * choices.
+   */
+  async listCoordinators() {
+    return this.prisma.client.coordinator.findMany({
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { user: { name: 'asc' } },
     });
   }
 

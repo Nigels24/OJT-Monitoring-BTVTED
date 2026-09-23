@@ -8,6 +8,105 @@ import { messagesApi } from "./messagesApi";
 
 export type StudentStatus = "ACTIVE" | "PENDING" | "COMPLETED" | "INACTIVE";
 
+export type Weekday = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+
+export type AssignmentStatus =
+  | "ACTIVE"
+  | "COMPLETED"
+  | "TRANSFERRED"
+  | "CANCELLED";
+
+/** `AssignmentProgress` (server: `common/assignment-progress.ts`), computed
+ * per TrainingAssignment from its own APPROVED/PENDING attendance only. */
+export interface AssignmentProgress {
+  requiredHours: number;
+  approvedHours: number;
+  pendingHours: number;
+  remainingHours: number;
+  /** 0-100, 2dp, capped at 100. */
+  percentComplete: number;
+  expectedDutyDaysToDate: number;
+  daysWithApprovedAttendance: number;
+}
+
+export interface TrainingAssignment {
+  id: string;
+  studentId: string;
+  establishmentId: string;
+  establishment: { id: string; name: string };
+  courseRequirementId: string | null;
+  blockId: string | null;
+  yearLevel: number;
+  requiredHours: number;
+  dutyDays: Weekday[];
+  startDate: string;
+  endDate: string | null;
+  academicYear: string;
+  status: AssignmentStatus;
+  coordinatorGrade: string | null;
+  coordinatorGradeRemarks: string | null;
+  gradedById: string | null;
+  gradedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  progress: AssignmentProgress;
+}
+
+/** `GET /coordinator/students/:id/placement-defaults` — the auto-filled hours
+ * a placement would use, from the student's course + year level. */
+export interface PlacementDefaults {
+  courseId: string;
+  yearLevel: number;
+  requirement: { id: string; yearLevel: number; requiredHours: number };
+  requiredHours: number;
+  establishment: { id: string; name: string; status: string } | null;
+}
+
+export interface CreatePlacementRequest {
+  establishmentId: string;
+  dutyDays: Weekday[];
+  startDate: string;
+  academicYear: string;
+  /** Overrides the requirement's hours; omit to use the auto-filled default. */
+  requiredHours?: number;
+  blockId?: string;
+}
+
+export interface UpdateAssignmentRequest {
+  dutyDays?: Weekday[];
+  /** `null` clears the end date; omit to leave it unchanged. */
+  endDate?: string | null;
+  status?: "COMPLETED" | "CANCELLED";
+}
+
+export interface ListStudentsParams {
+  /** Defaults server-side to "block" — the requesting coordinator's own blocks. */
+  scope?: "block" | "all";
+  courseId?: string;
+  yearLevel?: number;
+  blockId?: string;
+  academicYear?: string;
+  status?: StudentStatus;
+}
+
+export interface ListStudentsResponse {
+  /** True when `scope=block` fell back to the full roster because this
+   * coordinator has no blocks assigned yet. */
+  noBlocksAssigned: boolean;
+  students: Student[];
+}
+
+function toQueryString(
+  params: Record<string, string | number | undefined>,
+): string {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") usp.set(key, String(value));
+  }
+  const qs = usp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 /**
  * A student as returned by the coordinator endpoints (`/coordinator/students`).
  *
@@ -27,14 +126,21 @@ export interface Student {
   school?: string | null;
   contactNumber?: string | null;
   address?: string | null;
+  /** DEPRECATED free-text fields — still populated for students not yet on
+   * a structured Course/Block (see `courseId`/`blockId` below). */
   course?: string | null;
   yearLevel?: string | null;
+  courseId?: string | null;
+  blockId?: string | null;
   establishmentId?: string | null;
   requiredHours: number;
   startDate?: string | null;
   status: StudentStatus;
-  /** Sum of APPROVED attendance hours, computed server-side. */
+  /** The ACTIVE assignment's approved hours; 0 with `hasActiveAssignment:
+   * false` when the student has none. */
   completedHours: number;
+  hasActiveAssignment: boolean;
+  progress: AssignmentProgress;
   user: {
     id: string;
     email: string;
@@ -73,8 +179,16 @@ export interface StudentDetailsRequest {
   dateOfBirth?: string | null;
   contactNumber?: string | null;
   address?: string | null;
+  /** DEPRECATED — set automatically from `courseId`/`courseYearLevel` below
+   * when those are sent; only used directly for a student not on a course yet. */
   course?: string | null;
   yearLevel?: string | null;
+  courseId?: string | null;
+  blockId?: string | null;
+  /** Named apart from `yearLevel` above only because that name was already
+   * taken by the deprecated free-text field — there is no separate stored
+   * column for it (server: `resolveCourseFields`). */
+  courseYearLevel?: number | null;
   establishmentId?: string | null;
   requiredHours?: number;
   startDate?: string | null;
@@ -104,10 +218,11 @@ export type UpdateStudentRequest = StudentDetailsRequest;
 export const studentApi = createApi({
   reducerPath: "studentApi",
   baseQuery: baseQueryWithAuth,
-  tagTypes: ["Student"],
+  tagTypes: ["Student", "Assignment"],
   endpoints: (builder) => ({
-    getStudents: builder.query<Student[], void>({
-      query: () => "/coordinator/students",
+    getStudents: builder.query<ListStudentsResponse, ListStudentsParams | void>({
+      query: (params) =>
+        `/coordinator/students${toQueryString({ ...params })}`,
       providesTags: ["Student"],
     }),
     createStudent: builder.mutation<CreateStudentResponse, CreateStudentRequest>(
@@ -136,7 +251,7 @@ export const studentApi = createApi({
         url: `/coordinator/students/${id}`,
         method: "DELETE",
       }),
-      invalidatesTags: ["Student"],
+      invalidatesTags: ["Student", "Assignment"],
       // The server-side cascade (deleteStudentCascade) takes attendance,
       // documents, credentials, evaluations and messages with it. Those live
       // in other createApi slices whose tags this mutation can't reach on its
@@ -175,6 +290,47 @@ export const studentApi = createApi({
         body: { password },
       }),
     }),
+    /** The requirement + hours a placement would auto-fill, before confirming. */
+    getPlacementDefaults: builder.query<
+      PlacementDefaults,
+      { studentId: string; establishmentId?: string }
+    >({
+      query: ({ studentId, establishmentId }) =>
+        `/coordinator/students/${studentId}/placement-defaults${toQueryString({ establishmentId })}`,
+    }),
+    /**
+     * Records a placement: one action. If the student has an ACTIVE
+     * assignment it is transferred out (never deleted) and the new one starts
+     * at zero hours — see the confirmation copy in `use-placement.ts`.
+     */
+    createPlacement: builder.mutation<
+      TrainingAssignment,
+      { studentId: string } & CreatePlacementRequest
+    >({
+      query: ({ studentId, ...body }) => ({
+        url: `/coordinator/students/${studentId}/placements`,
+        method: "POST",
+        body,
+      }),
+      // The placed student's row (establishment/progress) and their
+      // assignment history both change.
+      invalidatesTags: ["Student", "Assignment"],
+    }),
+    getAssignments: builder.query<TrainingAssignment[], string>({
+      query: (studentId) => `/coordinator/students/${studentId}/assignments`,
+      providesTags: ["Assignment"],
+    }),
+    updateAssignment: builder.mutation<
+      TrainingAssignment,
+      { id: string } & UpdateAssignmentRequest
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/coordinator/assignments/${id}`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: ["Student", "Assignment"],
+    }),
   }),
 });
 
@@ -184,4 +340,9 @@ export const {
   useUpdateStudentMutation,
   useDeleteStudentMutation,
   useResetStudentPasswordMutation,
+  useGetPlacementDefaultsQuery,
+  useLazyGetPlacementDefaultsQuery,
+  useCreatePlacementMutation,
+  useGetAssignmentsQuery,
+  useUpdateAssignmentMutation,
 } = studentApi;

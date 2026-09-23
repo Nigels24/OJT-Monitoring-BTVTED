@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import { COORDINATOR_NAV } from "@/features/coordinator/nav";
 import PageHeader from "@/components/ui/PageHeader";
@@ -19,15 +19,27 @@ import {
 import { useStudents } from "@/features/student/hooks/use-students";
 import type { Student } from "@/lib/api/studentApi";
 import StudentList from "@/features/student/components/StudentList";
+import StudentFilterBar from "@/features/student/components/StudentFilterBar";
 import StudentViewDialog from "@/features/student/components/StudentViewDialog";
 import StudentEditDialog from "@/features/student/components/StudentEditDialog";
 import ResetPasswordDialog from "@/features/student/components/ResetPasswordDialog";
+import PlacementDialog from "@/features/student/components/PlacementDialog";
 import { deleteStudentMessage } from "@/lib/format";
 
-
 export default function StudentManagementPage() {
+  // `useStudents` reads the roster's scope/filters from the URL
+  // (`useSearchParams`), which Next requires a Suspense boundary for.
+  return (
+    <Suspense fallback={null}>
+      <StudentManagementPageContent />
+    </Suspense>
+  );
+}
+
+function StudentManagementPageContent() {
   const currentUser = useCurrentUser();
   const [resetTarget, setResetTarget] = useState<Student | null>(null);
+  const [placementTarget, setPlacementTarget] = useState<Student | null>(null);
   const {
     form,
     error,
@@ -40,17 +52,22 @@ export default function StudentManagementPage() {
     editTarget,
     isDialogOpen,
     search,
-    statusFilter,
     page,
     paged,
     totalPages,
     stats,
-    COURSE_OPTIONS,
-    YEAR_LEVEL_OPTIONS,
+    roster,
+    noBlocksAssigned,
+    hasOwnBlocks,
+    courses,
+    filterBlocks,
     STATUS_OPTIONS,
+    formYearLevelOptions,
+    formBlocks,
     setField,
+    setCourseField,
+    setYearLevelField,
     setSearch,
-    setStatusFilter,
     setPage,
     setDeleteTarget,
     setViewTarget,
@@ -116,16 +133,32 @@ export default function StudentManagementPage() {
         </div>
 
         <Card>
+          <StudentFilterBar
+            scope={roster.scope}
+            hasOwnBlocks={hasOwnBlocks}
+            noBlocksAssigned={noBlocksAssigned}
+            courseId={roster.courseId}
+            yearLevel={roster.yearLevel}
+            blockId={roster.blockId}
+            academicYear={roster.academicYear}
+            status={roster.status}
+            courses={courses}
+            filterBlocks={filterBlocks}
+            statusOptions={STATUS_OPTIONS}
+            onScopeChange={roster.setScope}
+            onCourseChange={roster.setCourseId}
+            onYearLevelChange={roster.setYearLevel}
+            onBlockChange={roster.setBlockId}
+            onAcademicYearChange={roster.setAcademicYear}
+            onStatusChange={roster.setStatus}
+          />
           <StudentList
             isLoading={isLoading}
             search={search}
-            statusFilter={statusFilter}
             page={page}
             totalPages={totalPages}
             paged={paged}
-            statusOptions={STATUS_OPTIONS}
             onSearchChange={setSearch}
-            onStatusFilterChange={setStatusFilter}
             onPageChange={setPage}
             onView={handleView}
             onEdit={handleEdit}
@@ -134,6 +167,9 @@ export default function StudentManagementPage() {
             }}
             onResetPassword={(student) => {
               setResetTarget(student);
+            }}
+            onPlace={(student) => {
+              setPlacementTarget(student);
             }}
           />
         </Card>
@@ -166,6 +202,9 @@ export default function StudentManagementPage() {
         onClose={() => {
           setViewTarget(null);
         }}
+        onPlace={(student) => {
+          setPlacementTarget(student);
+        }}
       />
 
       <StudentEditDialog
@@ -176,10 +215,13 @@ export default function StudentManagementPage() {
         isUpdating={isUpdating}
         error={error}
         establishments={establishments || []}
-        courseOptions={COURSE_OPTIONS}
-        yearLevelOptions={YEAR_LEVEL_OPTIONS}
+        courses={courses}
+        yearLevelOptions={formYearLevelOptions}
+        blocks={formBlocks}
         statusOptions={STATUS_OPTIONS}
         setField={setField}
+        onCourseChange={setCourseField}
+        onYearLevelChange={setYearLevelField}
         onSubmit={handleSubmit}
         onClose={closeDialog}
       />
@@ -188,6 +230,13 @@ export default function StudentManagementPage() {
         student={resetTarget}
         onClose={() => {
           setResetTarget(null);
+        }}
+      />
+
+      <PlacementDialog
+        student={placementTarget}
+        onClose={() => {
+          setPlacementTarget(null);
         }}
       />
     </div>

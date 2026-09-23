@@ -17,6 +17,7 @@ import Button from "@/components/ui/Button";
 import SelectField from "@/components/ui/SelectField";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
 import { Establishment } from "@/lib/api/establishmentApi";
+import { Block, Course } from "@/lib/api/courseApi";
 import { SCHOOL_NAME } from "@/lib/school";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
 
@@ -27,12 +28,15 @@ interface StudentFormProps {
   isUpdating: boolean;
   error: string;
   establishments: Establishment[];
-  courseOptions: string[];
-  yearLevelOptions: string[];
+  courses: Course[];
+  yearLevelOptions: number[];
+  blocks: Block[];
   statusOptions: StudentStatus[];
   setField: (
     key: keyof StudentFormValues,
   ) => (e: { target: { value: string } }) => void;
+  onCourseChange: (value: string) => void;
+  onYearLevelChange: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }
@@ -51,10 +55,13 @@ export default function StudentForm({
   isUpdating,
   error,
   establishments,
-  courseOptions,
+  courses,
   yearLevelOptions,
+  blocks,
   statusOptions,
   setField,
+  onCourseChange,
+  onYearLevelChange,
   onSubmit,
   onCancel,
 }: StudentFormProps) {
@@ -237,10 +244,13 @@ export default function StudentForm({
               Course / Program
             </label>
             <SelectField
-              value={form.course}
-              onChange={setValue("course")}
+              value={form.courseId}
+              onChange={onCourseChange}
               placeholder="Select Course"
-              options={courseOptions.map((c) => ({ label: c, value: c }))}
+              options={courses.map((c) => ({
+                label: `${c.code} — ${c.name}`,
+                value: c.id,
+              }))}
               className="w-full"
             />
           </div>
@@ -249,13 +259,48 @@ export default function StudentForm({
               Year Level
             </label>
             <SelectField
-              value={form.yearLevel}
-              onChange={setValue("yearLevel")}
-              placeholder="Select Year"
-              options={yearLevelOptions.map((y) => ({ label: y, value: y }))}
+              value={form.courseYearLevel}
+              onChange={onYearLevelChange}
+              placeholder={
+                form.courseId ? "Select Year" : "Select a course first"
+              }
+              disabled={!form.courseId}
+              options={yearLevelOptions.map((y) => ({
+                label: `Year ${y}`,
+                value: String(y),
+              }))}
               className="w-full"
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Block
+            </label>
+            <SelectField
+              value={form.blockId}
+              onChange={setValue("blockId")}
+              placeholder={
+                form.courseYearLevel ? "Select Block (optional)" : "Select a year level first"
+              }
+              disabled={!form.courseYearLevel}
+              options={[
+                { label: "None", value: "" },
+                ...blocks.map((b) => ({
+                  label: `${b.name} (${b.academicYear})`,
+                  value: b.id,
+                })),
+              ]}
+              className="w-full"
+            />
+          </div>
+          {!form.courseId && (editTarget?.course || editTarget?.yearLevel) && (
+            <p className="md:col-span-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Legacy record: {editTarget?.course || "no course"}
+              {editTarget?.yearLevel ? `, ${editTarget.yearLevel}` : ""}. Pick a
+              Course above to migrate this student onto the structured
+              course/block system.
+            </p>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Establishment Assignment
@@ -308,6 +353,11 @@ export default function StudentForm({
             />
           </div>
         </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Course/year level here set the student&apos;s program — they don&apos;t
+          place the student anywhere. Use &quot;Record placement&quot; from the
+          student list to assign an establishment and start the OJT clock.
+        </p>
       </section>
 
       {error && (

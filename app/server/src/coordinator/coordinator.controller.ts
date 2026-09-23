@@ -286,6 +286,44 @@ class CreatePlacementDto {
   blockId?: string;
 }
 
+/**
+ * `scope=block` (the default) narrows the roster to the requesting
+ * coordinator's own blocks — a view default, not an authorization boundary
+ * (Table 1: "own block, all on request"). The other filters narrow further,
+ * on top of whichever scope applies.
+ */
+class ListStudentsQueryDto {
+  @IsOptional()
+  @EmptyToUndefined()
+  @IsIn(['block', 'all'])
+  scope?: 'block' | 'all';
+
+  @IsOptional()
+  @EmptyToUndefined()
+  @IsString()
+  courseId?: string;
+
+  @IsOptional()
+  @ToOptionalNumber()
+  @IsInt()
+  yearLevel?: number;
+
+  @IsOptional()
+  @EmptyToUndefined()
+  @IsString()
+  blockId?: string;
+
+  @IsOptional()
+  @EmptyToUndefined()
+  @Matches(ACADEMIC_YEAR_PATTERN, { message: ACADEMIC_YEAR_MESSAGE })
+  academicYear?: string;
+
+  @IsOptional()
+  @EmptyToUndefined()
+  @IsIn(['ACTIVE', 'PENDING', 'COMPLETED', 'INACTIVE'])
+  status?: 'ACTIVE' | 'PENDING' | 'COMPLETED' | 'INACTIVE';
+}
+
 class UpdateAssignmentDto {
   @IsOptional()
   @IsArray()
@@ -324,8 +362,23 @@ export class CoordinatorController {
   }
 
   @Get('students')
-  listStudents() {
-    return this.coordinatorService.listStudents();
+  listStudents(
+    @Req() req: AuthedRequest,
+    @Query() query: ListStudentsQueryDto,
+  ) {
+    return this.coordinatorService.listStudents(req.user.userId, query);
+  }
+
+  /** The requesting coordinator's own blocks — populates the "My Block" scope's filters. */
+  @Get('me/blocks')
+  getMyBlocks(@Req() req: AuthedRequest) {
+    return this.coordinatorService.getMyBlocks(req.user.userId);
+  }
+
+  /** Every coordinator account, for the block form's "assigned coordinator" picker. */
+  @Get('coordinators')
+  listCoordinators() {
+    return this.coordinatorService.listCoordinators();
   }
 
   @Get('supervisors')

@@ -2,6 +2,7 @@ import { Users, X } from "lucide-react";
 import StudentForm from "./StudentForm";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
 import { Establishment } from "@/lib/api/establishmentApi";
+import { Block, Course } from "@/lib/api/courseApi";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
 import Overlay from "@/components/ui/Overlay";
 
@@ -13,12 +14,15 @@ interface StudentEditDialogProps {
   isUpdating: boolean;
   error: string;
   establishments: Establishment[];
-  courseOptions: string[];
-  yearLevelOptions: string[];
+  courses: Course[];
+  yearLevelOptions: number[];
+  blocks: Block[];
   statusOptions: StudentStatus[];
   setField: (
     key: keyof StudentFormValues,
   ) => (e: { target: { value: string } }) => void;
+  onCourseChange: (value: string) => void;
+  onYearLevelChange: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onClose: () => void;
 }
@@ -31,10 +35,13 @@ export default function StudentEditDialog({
   isUpdating,
   error,
   establishments,
-  courseOptions,
+  courses,
   yearLevelOptions,
+  blocks,
   statusOptions,
   setField,
+  onCourseChange,
+  onYearLevelChange,
   onSubmit,
   onClose,
 }: StudentEditDialogProps) {
@@ -72,10 +79,13 @@ export default function StudentEditDialog({
             isUpdating={isUpdating}
             error={error}
             establishments={establishments}
-            courseOptions={courseOptions}
+            courses={courses}
             yearLevelOptions={yearLevelOptions}
+            blocks={blocks}
             statusOptions={statusOptions}
             setField={setField}
+            onCourseChange={onCourseChange}
+            onYearLevelChange={onYearLevelChange}
             onSubmit={onSubmit}
             onCancel={onClose}
           />
