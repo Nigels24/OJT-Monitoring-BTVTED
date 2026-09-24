@@ -35,8 +35,9 @@ export interface CreateSupervisorRequest {
   email: string;
   /** Login name issued by the coordinator. No "@" allowed. */
   username: string;
-  /** Set by the coordinator and handed to the supervisor. */
-  password: string;
+  /** Leave unset and the server generates a readable one, returned once as
+   * `temporaryPassword` on the response. */
+  password?: string;
   name: string;
   establishmentId: string;
   position?: string;
@@ -48,6 +49,8 @@ export interface CreateSupervisorResponse {
   username: string | null;
   name: string;
   role: string;
+  /** Present only when `password` was omitted from the request. Shown once. */
+  temporaryPassword?: string;
 }
 
 export const supervisorManagementApi = createApi({
@@ -69,20 +72,6 @@ export const supervisorManagementApi = createApi({
         body,
       }),
       invalidatesTags: ["CoordinatorSupervisor"],
-    }),
-    /**
-     * Issues a new password for a supervisor who has forgotten theirs.
-     * No current password needed — that's the point.
-     */
-    resetSupervisorPassword: builder.mutation<
-      { id: string; name: string; username: string | null },
-      { id: string; password: string }
-    >({
-      query: ({ id, password }) => ({
-        url: `/coordinator/supervisors/${id}/password`,
-        method: "PATCH",
-        body: { password },
-      }),
     }),
     deleteSupervisor: builder.mutation<{ id: string; deleted: boolean }, string>(
       {
@@ -116,6 +105,5 @@ export const supervisorManagementApi = createApi({
 export const {
   useGetSupervisorsQuery,
   useCreateSupervisorMutation,
-  useResetSupervisorPasswordMutation,
   useDeleteSupervisorMutation,
 } = supervisorManagementApi;

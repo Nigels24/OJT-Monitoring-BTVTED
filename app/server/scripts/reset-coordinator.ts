@@ -72,7 +72,14 @@ async function main() {
 
   await prisma.user.update({
     where: { id: target.id },
-    data: { password: await bcrypt.hash(password, 10) },
+    data: {
+      password: await bcrypt.hash(password, 10),
+      // Only a generated password forces the change-on-next-login flow — an
+      // operator who passed their own password on the command line already
+      // made a deliberate choice, same as a coordinator typing one into the
+      // student/supervisor create form instead of leaving it blank.
+      mustChangePassword: !passwordArg,
+    },
   });
 
   console.log(`Password reset for ${target.name}:`);

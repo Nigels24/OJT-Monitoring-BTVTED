@@ -16,3 +16,14 @@ export function getJwtSecret(): string {
   }
   return secret;
 }
+
+/**
+ * The access token's lifetime and the session's inactivity budget, in
+ * minutes — the same number, since there is no separate refresh token (see
+ * `POST /auth/refresh`). A token this old is expired outright; the client is
+ * expected to call `/auth/refresh` on real user activity well before that to
+ * slide the window forward. Keep `SESSION_MAX_AGE_SECONDS`
+ * (`app/client/lib/auth.ts`) equal to this in seconds, for the same reason
+ * documented there.
+ */
+export const SESSION_IDLE_MINUTES = 30;

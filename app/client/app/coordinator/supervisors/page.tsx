@@ -7,6 +7,7 @@ import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import Button from "@/components/ui/Button";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import CredentialsDialog from "@/components/ui/CredentialsDialog";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { UserCog, Plus, Building2, UserX } from "lucide-react";
 import { useSupervisorManagement } from "@/features/supervisor-management/hooks/use-supervisor-management";
@@ -26,6 +27,7 @@ export default function SupervisorManagementPage() {
     resetTarget,
     deleteTarget,
     isDialogOpen,
+    credentials,
     search,
     page,
     paged,
@@ -36,6 +38,7 @@ export default function SupervisorManagementPage() {
     setPage,
     setResetTarget,
     setDeleteTarget,
+    closeCredentials,
     handleSubmit,
     handleDeleteConfirm,
     handleOpenAddDialog,
@@ -144,6 +147,16 @@ export default function SupervisorManagementPage() {
           setResetTarget(null);
         }}
       />
+
+      {credentials && (
+        <CredentialsDialog
+          open
+          name={credentials.name}
+          identifier={credentials.identifier}
+          temporaryPassword={credentials.temporaryPassword}
+          onClose={closeCredentials}
+        />
+      )}
     </div>
   );
 }

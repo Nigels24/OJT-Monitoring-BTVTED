@@ -12,6 +12,7 @@ import { attendanceOversightApi } from "./api/attendanceOversightApi";
 import { documentApi } from "./api/documentApi";
 import { messagesApi } from "./api/messagesApi";
 import { courseApi } from "./api/courseApi";
+import { userManagementApi } from "./api/userManagementApi";
 
 export const store = configureStore({
   reducer: {
@@ -28,6 +29,7 @@ export const store = configureStore({
     [documentApi.reducerPath]: documentApi.reducer,
     [messagesApi.reducerPath]: messagesApi.reducer,
     [courseApi.reducerPath]: courseApi.reducer,
+    [userManagementApi.reducerPath]: userManagementApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
@@ -53,7 +55,8 @@ export const store = configureStore({
       attendanceOversightApi.middleware,
       documentApi.middleware,
       messagesApi.middleware,
-      courseApi.middleware
+      courseApi.middleware,
+      userManagementApi.middleware
     ),
 });
 

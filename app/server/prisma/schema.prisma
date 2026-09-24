@@ -259,6 +259,14 @@ model Student {
   blockId        String?
   block          Block?  @relation(fields: [blockId], references: [id])
 
+  // The structured counterpart to the deprecated `yearLevel` free-text column
+  // above, matched against `CourseRequirement.yearLevel`. Nullable because a
+  // student may have no course/year level set yet, and because every row
+  // predating this column has none. `resolveCourseFields`
+  // (coordinator.service.ts) keeps this and the legacy `yearLevel` string in
+  // sync whenever either is written.
+  courseYearLevel Int?
+
   // Personal details captured by the coordinator's student form. All nullable
   // because every student created before this migration has none of them.
   // `age` is stored alongside `dateOfBirth` rather than derived, matching how

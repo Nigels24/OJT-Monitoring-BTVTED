@@ -7,6 +7,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Card from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import CredentialsDialog from "@/components/ui/CredentialsDialog";
 import Button from "@/components/ui/Button";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import {
@@ -51,6 +52,7 @@ function StudentManagementPageContent() {
     viewTarget,
     editTarget,
     isDialogOpen,
+    credentials,
     search,
     page,
     paged,
@@ -71,6 +73,7 @@ function StudentManagementPageContent() {
     setPage,
     setDeleteTarget,
     setViewTarget,
+    closeCredentials,
     handleSubmit,
     handleDeleteConfirm,
     handleView,
@@ -232,6 +235,16 @@ function StudentManagementPageContent() {
           setResetTarget(null);
         }}
       />
+
+      {credentials && (
+        <CredentialsDialog
+          open
+          name={credentials.name}
+          identifier={credentials.identifier}
+          temporaryPassword={credentials.temporaryPassword}
+          onClose={closeCredentials}
+        />
+      )}
 
       <PlacementDialog
         student={placementTarget}

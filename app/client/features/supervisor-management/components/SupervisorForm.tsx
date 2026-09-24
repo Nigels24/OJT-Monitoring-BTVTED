@@ -69,10 +69,9 @@ export default function SupervisorForm({
           labelIcon={KeyRound}
           fieldIcon={KeyRound}
           type="text"
-          required
           value={form.password}
           onChange={setField("password")}
-          placeholder="At least 8 characters"
+          placeholder="Leave blank to auto-generate"
           minLength={8}
           autoComplete="off"
         />
@@ -101,9 +100,11 @@ export default function SupervisorForm({
         />
       </div>
       <p className="text-xs text-gray-500">
-        You choose the supervisor&apos;s username and password, then pass them
-        on. The password is shown as plain text here so you can read it back
-        to them — it is stored hashed and cannot be retrieved later.
+        Leave the password blank and the system generates one — you&apos;ll
+        get a &quot;Credentials to release&quot; screen to copy and hand to
+        the supervisor. Type your own instead if you&apos;d rather set it
+        yourself. Either way, they&apos;ll be asked to set their own password
+        the first time they sign in.
       </p>
 
       {error && (

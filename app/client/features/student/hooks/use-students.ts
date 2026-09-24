@@ -116,6 +116,14 @@ export function useStudents() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // Set only when createStudent's response carries a system-generated
+  // temporaryPassword (i.e. the coordinator left the password field blank) —
+  // the "Credentials to release" dialog reads this once, then it's gone.
+  const [credentials, setCredentials] = useState<{
+    name: string;
+    identifier: string;
+    temporaryPassword: string;
+  } | null>(null);
 
   const { showSuccess, showError } = useSnackbar();
 
@@ -245,14 +253,24 @@ export function useStudents() {
         const result = await createStudent({
           email: form.email,
           username: form.username,
-          password: form.password,
+          // Blank -> undefined, not "": an empty string is a too-short
+          // password to the server's validator, not "please generate one".
+          password: form.password || undefined,
           studentIdNumber: form.studentIdNumber,
           ...detailsPayload(),
         }).unwrap();
 
-        showSuccess(
-          `"${result.name}" has been added. Give them the username and password you set.`,
-        );
+        if (result.temporaryPassword) {
+          setCredentials({
+            name: result.name,
+            identifier: result.username ?? result.email,
+            temporaryPassword: result.temporaryPassword,
+          });
+        } else {
+          showSuccess(
+            `"${result.name}" has been added. Give them the username and password you set.`,
+          );
+        }
       }
       closeDialog();
     } catch (err: unknown) {
@@ -300,10 +318,7 @@ export function useStudents() {
       contactNumber: student.contactNumber ?? "",
       address: student.address ?? "",
       courseId: student.courseId ?? "",
-      // There is no stored numeric year level to read back (see
-      // `courseYearLevel`'s comment) — left blank on edit even for a student
-      // already on a course; the coordinator re-picks it if it needs changing.
-      courseYearLevel: "",
+      courseYearLevel: student.courseYearLevel?.toString() ?? "",
       blockId: student.blockId ?? "",
       establishmentId: student.establishmentId ?? "",
       requiredHours: student.requiredHours?.toString() ?? "",
@@ -370,6 +385,7 @@ export function useStudents() {
     viewTarget,
     editTarget,
     isDialogOpen,
+    credentials,
     search,
     page,
     paged,
@@ -395,6 +411,9 @@ export function useStudents() {
     setPage,
     setDeleteTarget,
     setViewTarget,
+    closeCredentials: () => {
+      setCredentials(null);
+    },
 
     handleSubmit,
     handleDeleteConfirm,

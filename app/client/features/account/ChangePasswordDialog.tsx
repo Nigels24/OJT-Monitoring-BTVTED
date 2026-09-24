@@ -5,6 +5,7 @@ import { KeyRound, X } from "lucide-react";
 import TextField from "@/components/ui/TextField";
 import Button from "@/components/ui/Button";
 import { useChangePasswordMutation } from "@/lib/api/authApi";
+import { persistSession, type StoredUser } from "@/lib/auth";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import Overlay from "@/components/ui/Overlay";
 
@@ -53,6 +54,10 @@ export default function ChangePasswordDialog({
       setError(`New password must be at least ${MIN_LENGTH} characters.`);
       return;
     }
+    if (!/(?=.*[A-Za-z])(?=.*\d)/.test(newPassword)) {
+      setError("New password must contain at least one letter and one number.");
+      return;
+    }
     // Caught here rather than server-side: the confirmation field exists only
     // to catch typing mistakes, so it never needs to reach the API.
     if (newPassword !== confirmPassword) {
@@ -61,7 +66,14 @@ export default function ChangePasswordDialog({
     }
 
     try {
-      await changePassword({ currentPassword, newPassword }).unwrap();
+      const result = await changePassword({
+        currentPassword,
+        newPassword,
+      }).unwrap();
+      // The endpoint always returns a fresh session (see authApi's comment) —
+      // the old token's now-stale claims stay valid until it expires
+      // otherwise, so this keeps the stored token in step.
+      persistSession(result.accessToken, result.user as StoredUser);
       showSuccess("Your password has been changed.");
       close();
     } catch (err: unknown) {

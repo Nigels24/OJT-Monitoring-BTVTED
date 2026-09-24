@@ -131,6 +131,9 @@ export interface Student {
   course?: string | null;
   yearLevel?: string | null;
   courseId?: string | null;
+  /** The structured counterpart to `yearLevel` above (see
+   * `StudentDetailsRequest.courseYearLevel`), now backed by its own column. */
+  courseYearLevel?: number | null;
   blockId?: string | null;
   establishmentId?: string | null;
   requiredHours: number;
@@ -186,8 +189,7 @@ export interface StudentDetailsRequest {
   courseId?: string | null;
   blockId?: string | null;
   /** Named apart from `yearLevel` above only because that name was already
-   * taken by the deprecated free-text field — there is no separate stored
-   * column for it (server: `resolveCourseFields`). */
+   * taken by the deprecated free-text field (server: `resolveCourseFields`). */
   courseYearLevel?: number | null;
   establishmentId?: string | null;
   requiredHours?: number;
@@ -199,8 +201,9 @@ export interface CreateStudentRequest extends StudentDetailsRequest {
   email: string;
   /** Login name issued by the coordinator. No "@" allowed. */
   username: string;
-  /** Set by the coordinator and handed to the student. */
-  password: string;
+  /** Leave unset and the server generates a readable one, returned once as
+   * `temporaryPassword` on the response. */
+  password?: string;
   studentIdNumber: string;
   name?: string;
 }
@@ -211,6 +214,8 @@ export interface CreateStudentResponse {
   username: string | null;
   name: string;
   role: string;
+  /** Present only when `password` was omitted from the request. Shown once. */
+  temporaryPassword?: string;
 }
 
 export type UpdateStudentRequest = StudentDetailsRequest;
@@ -276,20 +281,6 @@ export const studentApi = createApi({
         }
       },
     }),
-    /**
-     * Issues a new password for a student who has forgotten theirs.
-     * No current password needed — that's the point.
-     */
-    resetStudentPassword: builder.mutation<
-      { id: string; name: string; username: string | null },
-      { id: string; password: string }
-    >({
-      query: ({ id, password }) => ({
-        url: `/coordinator/students/${id}/password`,
-        method: "PATCH",
-        body: { password },
-      }),
-    }),
     /** The requirement + hours a placement would auto-fill, before confirming. */
     getPlacementDefaults: builder.query<
       PlacementDefaults,
@@ -339,7 +330,6 @@ export const {
   useCreateStudentMutation,
   useUpdateStudentMutation,
   useDeleteStudentMutation,
-  useResetStudentPasswordMutation,
   useGetPlacementDefaultsQuery,
   useLazyGetPlacementDefaultsQuery,
   useCreatePlacementMutation,

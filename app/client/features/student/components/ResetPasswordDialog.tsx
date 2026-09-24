@@ -1,74 +1,48 @@
 import { useState } from "react";
-import { KeyRound, X, Copy, Check } from "lucide-react";
-import TextField from "@/components/ui/TextField";
+import { KeyRound, X } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { Student, useResetStudentPasswordMutation } from "@/lib/api/studentApi";
-import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import Overlay from "@/components/ui/Overlay";
+import CredentialsDialog from "@/components/ui/CredentialsDialog";
+import { Student } from "@/lib/api/studentApi";
+import { useResetUserPasswordMutation } from "@/lib/api/userManagementApi";
+import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 
 interface ResetPasswordDialogProps {
   student: Student | null;
   onClose: () => void;
 }
 
-const MIN_LENGTH = 8;
-
-/** Generated default so the coordinator doesn't have to invent one. */
-function suggestPassword(): string {
-  return `ojt-${Math.random().toString(36).slice(2, 8)}`;
-}
-
 /**
- * Issues a new password for a student who has forgotten theirs.
- *
- * This is the recovery path in place of an emailed reset link — there is no
- * mail infrastructure, and the coordinator already issues every credential by
- * hand. The password is shown in plain text so it can be read out or copied;
- * it is hashed server-side and unreadable afterwards.
+ * Issues a new, system-generated password for a student who has forgotten
+ * theirs — the coordinator no longer invents one (see the create-student
+ * flow, same reasoning). A confirm step, then the same "Credentials to
+ * release" dialog the create flow shows: the coordinator never sees or
+ * chooses the password itself, only reads it back once to hand over.
  */
 export default function ResetPasswordDialog({
   student,
   onClose,
 }: ResetPasswordDialogProps) {
-  const [password, setPassword] = useState(suggestPassword);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [done, setDone] = useState(false);
-  const [resetPassword, { isLoading }] = useResetStudentPasswordMutation();
+  const [result, setResult] = useState<{ temporaryPassword: string } | null>(
+    null,
+  );
+  const [resetPassword, { isLoading }] = useResetUserPasswordMutation();
   const { showSuccess } = useSnackbar();
 
   const close = () => {
-    setPassword(suggestPassword());
     setError("");
-    setCopied(false);
-    setDone(false);
+    setResult(null);
     onClose();
   };
 
-  const handleCopy = async () => {
+  const handleGenerate = async () => {
     if (!student) return;
-    await navigator.clipboard.writeText(
-      `Username: ${student.user.username ?? student.user.email}\nPassword: ${password}`,
-    );
-    setCopied(true);
-    setTimeout(() => {
-      setCopied(false);
-    }, 2000);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     setError("");
-
-    if (password.length < MIN_LENGTH) {
-      setError(`Password must be at least ${MIN_LENGTH} characters.`);
-      return;
-    }
-
     try {
-      await resetPassword({ id: student!.id, password }).unwrap();
-      setDone(true);
-      showSuccess(`Password reset for ${student!.user.name}.`);
+      const res = await resetPassword(student.userId).unwrap();
+      setResult(res);
+      showSuccess(`Password reset for ${student.user.name}.`);
     } catch (err: unknown) {
       const data = (err as { data?: { message?: string | string[] } })?.data;
       setError(
@@ -80,6 +54,18 @@ export default function ResetPasswordDialog({
   };
 
   if (!student) return null;
+
+  if (result) {
+    return (
+      <CredentialsDialog
+        open
+        name={student.user.name}
+        identifier={student.user.username ?? student.user.email}
+        temporaryPassword={result.temporaryPassword}
+        onClose={close}
+      />
+    );
+  }
 
   return (
     <Overlay
@@ -115,73 +101,37 @@ export default function ResetPasswordDialog({
             </div>
           </div>
 
-          {done ? (
-            <>
-              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Password changed. Give it to the student now — it can&apos;t be
-                read back later.
-              </p>
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 flex items-center justify-between gap-4">
-                <span className="text-sm text-gray-500">New password</span>
-                <span className="font-mono font-semibold text-gray-900 break-all">
-                  {password}
-                </span>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Button
-                  type="button"
-                  icon={copied ? Check : Copy}
-                  variant="secondary"
-                  onClick={handleCopy}
-                >
-                  {copied ? "Copied" : "Copy login details"}
-                </Button>
-                <Button type="button" onClick={close}>
-                  Done
-                </Button>
-              </div>
-            </>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <TextField
-                label="New Password"
-                labelIcon={KeyRound}
-                fieldIcon={KeyRound}
-                type="text"
-                required
-                minLength={MIN_LENGTH}
-                autoComplete="off"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={`At least ${MIN_LENGTH} characters`}
-              />
-              <p className="text-xs text-gray-500">
-                A password has been suggested — edit it if you prefer. The
-                student can change it themselves once they sign in.
-              </p>
+          <p className="text-sm text-gray-600">
+            This generates a new password and immediately replaces the
+            student&apos;s old one. They&apos;ll be asked to set their own
+            the next time they sign in.
+          </p>
 
-              {error && (
-                <p className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
-                  {error}
-                </p>
-              )}
-
-              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={close}
-                  className="px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <div className="sm:w-44">
-                  <Button type="submit" icon={KeyRound} loading={isLoading}>
-                    Reset password
-                  </Button>
-                </div>
-              </div>
-            </form>
+          {error && (
+            <p className="text-sm text-red-600 border border-red-200 bg-red-50 rounded-lg px-3 py-2">
+              {error}
+            </p>
           )}
+
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+            <button
+              type="button"
+              onClick={close}
+              className="px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <div className="sm:w-56">
+              <Button
+                type="button"
+                icon={KeyRound}
+                loading={isLoading}
+                onClick={handleGenerate}
+              >
+                Generate new password
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </Overlay>

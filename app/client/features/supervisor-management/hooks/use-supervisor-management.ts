@@ -33,6 +33,13 @@ export function useSupervisorManagement() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // Set only when createSupervisor's response carries a system-generated
+  // temporaryPassword — see use-students.ts's identical field for why.
+  const [credentials, setCredentials] = useState<{
+    name: string;
+    identifier: string;
+    temporaryPassword: string;
+  } | null>(null);
 
   const { showSuccess, showError } = useSnackbar();
 
@@ -56,15 +63,25 @@ export function useSupervisorManagement() {
       const result = await createSupervisor({
         email: form.email,
         username: form.username,
-        password: form.password,
+        // Blank -> undefined, not "": an empty string is a too-short
+        // password to the server's validator, not "please generate one".
+        password: form.password || undefined,
         name: form.name,
         establishmentId: form.establishmentId,
         position: form.position || undefined,
       }).unwrap();
 
-      showSuccess(
-        `"${result.name}" has been added. Give them the username and password you set.`,
-      );
+      if (result.temporaryPassword) {
+        setCredentials({
+          name: result.name,
+          identifier: result.username ?? result.email,
+          temporaryPassword: result.temporaryPassword,
+        });
+      } else {
+        showSuccess(
+          `"${result.name}" has been added. Give them the username and password you set.`,
+        );
+      }
       closeDialog();
     } catch (err: unknown) {
       const message = readError(err, "Failed to add supervisor.");
@@ -135,6 +152,7 @@ export function useSupervisorManagement() {
     resetTarget,
     deleteTarget,
     isDialogOpen,
+    credentials,
     search,
     page,
     paged,
@@ -145,6 +163,9 @@ export function useSupervisorManagement() {
     setSearch,
     setPage,
     setResetTarget,
+    closeCredentials: () => {
+      setCredentials(null);
+    },
     setDeleteTarget,
 
     handleSubmit,

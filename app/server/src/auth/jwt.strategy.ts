@@ -16,7 +16,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   // Passport accepts a sync return here; there is nothing to await.
   // Whatever this returns becomes `req.user` — see AuthedRequest.
-  validate(payload: { sub: string; email: string; role: string }): JwtUser {
-    return { userId: payload.sub, email: payload.email, role: payload.role };
+  validate(payload: {
+    sub: string;
+    email: string;
+    role: string;
+    mustChangePassword?: boolean;
+  }): JwtUser {
+    return {
+      userId: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      mustChangePassword: payload.mustChangePassword ?? false,
+    };
   }
 }

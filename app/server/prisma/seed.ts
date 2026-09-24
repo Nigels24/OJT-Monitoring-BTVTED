@@ -45,6 +45,12 @@ async function seedCoordinator() {
       password: await bcrypt.hash(COORDINATOR.password, 10),
       name: COORDINATOR.name,
       role: 'COORDINATOR',
+      // Not a coordinator-issued temporary credential — it's a known,
+      // documented bootstrap password (this file, or SEED_COORDINATOR_*),
+      // so it shouldn't force the standalone /change-password flow on first
+      // sign-in. `User.mustChangePassword` defaults to true, which is right
+      // for every account the app itself creates, just not this one.
+      mustChangePassword: false,
       coordinatorProfile: { create: {} },
     },
   });

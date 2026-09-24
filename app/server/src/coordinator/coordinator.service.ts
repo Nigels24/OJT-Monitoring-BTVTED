@@ -37,6 +37,7 @@ import {
 } from '../common/cascade-delete';
 import { deleteFile } from '../common/storage';
 import { SCHOOL_NAME } from '../common/school';
+import { generateTemporaryPassword } from '../common/temp-password';
 
 /** Fields the coordinator can set on a student, shared by create and update. */
 /**
@@ -86,21 +87,25 @@ export class CoordinatorService {
   }
 
   /**
-   * Validates courseId/blockId (existence, and that the block belongs to the
-   * course) and derives fresh values for the deprecated `course`/`yearLevel`
-   * free-text columns from them, so screens that still read those two columns
-   * keep showing something accurate instead of going stale the moment a
-   * student is put on a structured course. A no-op — `data` passed through
-   * untouched — when none of courseId/blockId/courseYearLevel are in the
-   * request, which is the entire existing free-text create/update path.
+   * Validates courseId/blockId/courseYearLevel (existence, that a given
+   * courseYearLevel has a matching `CourseRequirement`, and that a given
+   * block belongs to the selected course and year level) and derives a fresh
+   * value for the deprecated `course`/`yearLevel` free-text columns from
+   * them, so screens that still read those two columns keep showing
+   * something accurate instead of going stale the moment a student is put on
+   * a structured course. A no-op — `data` passed through untouched — when
+   * none of courseId/blockId/courseYearLevel are in the request, which is the
+   * entire existing free-text create/update path.
    *
-   * `existingCourseId` is the student's current courseId (null for a brand
-   * new student); it is the fallback used to validate a `blockId` sent
-   * without an accompanying `courseId` on an update.
+   * `existingCourseId`/`existingCourseYearLevel` are the student's current
+   * values (null for a brand new student); they are the fallback used to
+   * validate a `blockId` sent without an accompanying `courseId`/
+   * `courseYearLevel` on an update.
    */
   private async resolveCourseFields(
     data: StudentDetails,
     existingCourseId: string | null,
+    existingCourseYearLevel: number | null,
   ): Promise<StudentDetails> {
     if (
       data.courseId === undefined &&
@@ -113,6 +118,10 @@ export class CoordinatorService {
     const resolved: StudentDetails = { ...data };
     const effectiveCourseId =
       data.courseId !== undefined ? data.courseId : existingCourseId;
+    const effectiveCourseYearLevel =
+      data.courseYearLevel !== undefined
+        ? data.courseYearLevel
+        : existingCourseYearLevel;
 
     if (effectiveCourseId) {
       const course = await this.prisma.client.course.findUnique({
@@ -127,10 +136,37 @@ export class CoordinatorService {
       resolved.course = null;
     }
 
+    // Only validated when this request is actually setting a year level —
+    // not when one merely carries over from the existing row — so clearing
+    // an unrelated field on a student who already has a courseYearLevel set
+    // doesn't re-trigger this check.
+    if (data.courseYearLevel) {
+      if (!effectiveCourseId) {
+        throw new BadRequestException(
+          'Select a course before setting a year level',
+        );
+      }
+      const requirement = await this.prisma.client.courseRequirement.findUnique(
+        {
+          where: {
+            courseId_yearLevel: {
+              courseId: effectiveCourseId,
+              yearLevel: data.courseYearLevel,
+            },
+          },
+        },
+      );
+      if (!requirement) {
+        throw new BadRequestException(
+          `This course has no OJT requirement defined for year ${data.courseYearLevel}.`,
+        );
+      }
+    }
+
     if (data.blockId) {
       const block = await this.prisma.client.block.findUnique({
         where: { id: data.blockId },
-        select: { courseId: true },
+        select: { courseId: true, yearLevel: true },
       });
       if (!block) {
         throw new BadRequestException('blockId does not match a block');
@@ -140,11 +176,28 @@ export class CoordinatorService {
           'Block does not belong to the selected course',
         );
       }
+      if (
+        effectiveCourseYearLevel !== null &&
+        effectiveCourseYearLevel !== undefined
+      ) {
+        if (block.yearLevel !== effectiveCourseYearLevel) {
+          throw new BadRequestException(
+            'Block does not match the selected year level',
+          );
+        }
+      } else {
+        // No year level was given or already on file — a block still
+        // implies one, so adopt it rather than leaving courseYearLevel null
+        // even though the student is on a block.
+        resolved.courseYearLevel = block.yearLevel;
+      }
     }
 
-    if (data.courseYearLevel !== undefined) {
+    if (resolved.courseYearLevel !== undefined) {
       resolved.yearLevel =
-        data.courseYearLevel === null ? null : String(data.courseYearLevel);
+        resolved.courseYearLevel === null
+          ? null
+          : ordinalYearLabel(resolved.courseYearLevel);
     }
 
     return resolved;
@@ -153,14 +206,25 @@ export class CoordinatorService {
   async createSupervisor(data: {
     email: string;
     username: string;
-    password: string;
+    password?: string;
     name: string;
     establishmentId: string;
     position?: string;
   }) {
     await this.assertCredentialsAvailable(data.email, data.username);
 
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    // A coordinator-chosen password is honoured; an omitted one gets a
+    // readable generated one, returned in plaintext exactly once below.
+    // `mustChangePassword` isn't set here either way — it's the schema
+    // default (true), correct for both cases: first login always forces a
+    // real change, whether or not the coordinator picked the temp value.
+    const temporaryPassword = data.password
+      ? undefined
+      : generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(
+      data.password ?? temporaryPassword!,
+      10,
+    );
 
     const user = await this.prisma.client.user.create({
       data: {
@@ -180,14 +244,14 @@ export class CoordinatorService {
     });
 
     const { password, ...result } = user;
-    return result;
+    return { ...result, temporaryPassword };
   }
 
   async createStudent(
     data: StudentDetails & {
       email: string;
       username: string;
-      password: string;
+      password?: string;
       studentIdNumber: string;
     },
   ) {
@@ -209,9 +273,18 @@ export class CoordinatorService {
       );
     }
 
-    const resolved = await this.resolveCourseFields(data, null);
+    const resolved = await this.resolveCourseFields(data, null, null);
 
-    const hashedPassword = await bcrypt.hash(data.password, 10);
+    // See createSupervisor's comment: omitted password -> generated one,
+    // returned once; mustChangePassword stays the schema default (true)
+    // either way.
+    const temporaryPassword = data.password
+      ? undefined
+      : generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(
+      data.password ?? temporaryPassword!,
+      10,
+    );
 
     // User and Student are separate rows. Without a transaction a failure on
     // the second write would leave a login with no profile, which every
@@ -243,7 +316,7 @@ export class CoordinatorService {
     });
 
     const { password, ...result } = user;
-    return result;
+    return { ...result, temporaryPassword };
   }
 
   /**
@@ -292,19 +365,15 @@ export class CoordinatorService {
       ...(filters.courseId ? { courseId: filters.courseId } : {}),
       ...(filters.blockId ? { blockId: filters.blockId } : {}),
       ...(filters.status ? { status: filters.status } : {}),
-      // yearLevel/academicYear live on Block, not Student directly — a
-      // student not yet assigned to a block simply cannot match either.
-      ...(filters.yearLevel !== undefined || filters.academicYear
-        ? {
-            block: {
-              ...(filters.yearLevel !== undefined
-                ? { yearLevel: filters.yearLevel }
-                : {}),
-              ...(filters.academicYear
-                ? { academicYear: filters.academicYear }
-                : {}),
-            },
-          }
+      // yearLevel now matches Student.courseYearLevel directly, so a student
+      // not yet assigned to a block can still match. academicYear has no
+      // Student-level counterpart — it only lives on Block — so it still
+      // narrows through that relation.
+      ...(filters.yearLevel !== undefined
+        ? { courseYearLevel: filters.yearLevel }
+        : {}),
+      ...(filters.academicYear
+        ? { block: { academicYear: filters.academicYear } }
         : {}),
     };
 
@@ -846,7 +915,11 @@ export class CoordinatorService {
       });
     }
 
-    const resolved = await this.resolveCourseFields(data, student.courseId);
+    const resolved = await this.resolveCourseFields(
+      data,
+      student.courseId,
+      student.courseYearLevel,
+    );
 
     return this.prisma.client.student.update({
       where: { id: studentId },
@@ -870,6 +943,10 @@ export class CoordinatorService {
    * password and sign in as them; that authority is inherent to a system where
    * the coordinator issues every credential, and it stops at COORDINATOR
    * accounts, which only the CLI can reset.
+   *
+   * Sets `mustChangePassword` so the coordinator-chosen value here is treated
+   * the same as a coordinator-chosen value at account creation: a temporary
+   * credential the owner is forced to replace on their next sign-in.
    */
   async resetStudentPassword(studentId: string, password: string) {
     const student = await this.prisma.client.student.findUnique({
@@ -882,7 +959,10 @@ export class CoordinatorService {
 
     await this.prisma.client.user.update({
       where: { id: student.userId },
-      data: { password: await bcrypt.hash(password, 10) },
+      data: {
+        password: await bcrypt.hash(password, 10),
+        mustChangePassword: true,
+      },
     });
 
     return {
@@ -904,7 +984,10 @@ export class CoordinatorService {
 
     await this.prisma.client.user.update({
       where: { id: supervisor.userId },
-      data: { password: await bcrypt.hash(password, 10) },
+      data: {
+        password: await bcrypt.hash(password, 10),
+        mustChangePassword: true,
+      },
     });
 
     return {
@@ -912,6 +995,44 @@ export class CoordinatorService {
       name: supervisor.user.name,
       username: supervisor.user.username,
       passwordReset: true,
+    };
+  }
+
+  /**
+   * The system-generated counterpart to the two methods above, keyed by User
+   * id rather than a student/supervisor profile id since it's the same
+   * operation either way. Stops at COORDINATOR accounts for the same reason
+   * `resetStudentPassword`'s comment gives — that authority stays with the
+   * `reset-coordinator` CLI script, never the web app, coordinator included.
+   */
+  async resetPasswordForUser(userId: string) {
+    const user = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, name: true, username: true },
+    });
+    if (!user) {
+      throw new NotFoundException('Account not found');
+    }
+    if (user.role === 'COORDINATOR') {
+      throw new BadRequestException(
+        'Coordinator accounts cannot be reset here — run the reset-coordinator CLI script instead.',
+      );
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+    await this.prisma.client.user.update({
+      where: { id: userId },
+      data: {
+        password: await bcrypt.hash(temporaryPassword, 10),
+        mustChangePassword: true,
+      },
+    });
+
+    return {
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      temporaryPassword,
     };
   }
 
@@ -1034,32 +1155,6 @@ export class CoordinatorService {
   }
 
   /**
-   * A student's numeric year level, for matching against
-   * `CourseRequirement.yearLevel`. There is no dedicated column for this (see
-   * `resolveCourseFields`'s comment) — a Block is authoritative when one
-   * applies (it stores a real Int), so it is preferred; otherwise this falls
-   * back to parsing the deprecated `Student.yearLevel` free-text column, which
-   * `resolveCourseFields` writes as a clean digit string whenever
-   * `courseYearLevel` was used, making the parse reliable going forward. Older
-   * free text predating this step may still fail to parse — that is a `null`
-   * here, not a guess, and callers turn it into a 400.
-   */
-  private async resolveStudentYearLevel(
-    student: { yearLevel: string | null; blockId: string | null },
-    overrideBlockId?: string,
-  ): Promise<number | null> {
-    const blockId = overrideBlockId ?? student.blockId ?? undefined;
-    if (blockId) {
-      const block = await this.prisma.client.block.findUnique({
-        where: { id: blockId },
-        select: { yearLevel: true },
-      });
-      if (block) return block.yearLevel;
-    }
-    return parseYearLevel(student.yearLevel);
-  }
-
-  /**
    * The CourseRequirement a placement would auto-fill from, so the coordinator
    * can see it — and the establishment they are considering — before
    * confirming. Record placement is meant to be one action (thesis rule): this
@@ -1069,7 +1164,7 @@ export class CoordinatorService {
   async getPlacementDefaults(studentId: string, establishmentId?: string) {
     const student = await this.prisma.client.student.findUnique({
       where: { id: studentId },
-      select: { id: true, courseId: true, blockId: true, yearLevel: true },
+      select: { id: true, courseId: true, courseYearLevel: true },
     });
     if (!student) {
       throw new NotFoundException('Student not found');
@@ -1080,7 +1175,7 @@ export class CoordinatorService {
       );
     }
 
-    const yearLevel = await this.resolveStudentYearLevel(student);
+    const yearLevel = student.courseYearLevel;
     if (yearLevel === null) {
       throw new BadRequestException(
         'This student has no year level set. Assign a year level (or a block) before recording a placement.',
@@ -1166,7 +1261,7 @@ export class CoordinatorService {
     if (data.blockId) {
       const block = await this.prisma.client.block.findUnique({
         where: { id: data.blockId },
-        select: { id: true, courseId: true },
+        select: { id: true, courseId: true, yearLevel: true },
       });
       if (!block) {
         throw new BadRequestException('blockId does not match a block');
@@ -1176,12 +1271,20 @@ export class CoordinatorService {
           "Block does not belong to the student's course",
         );
       }
+      if (
+        student.courseYearLevel !== null &&
+        block.yearLevel !== student.courseYearLevel
+      ) {
+        throw new BadRequestException(
+          "Block does not match the student's year level",
+        );
+      }
     }
 
-    const yearLevel = await this.resolveStudentYearLevel(student, data.blockId);
+    const yearLevel = student.courseYearLevel;
     if (yearLevel === null) {
       throw new BadRequestException(
-        'This student has no year level set. Assign a course/year level or a block before recording a placement.',
+        'This student has no year level set. Assign a course/year level before recording a placement.',
       );
     }
 
@@ -1374,15 +1477,24 @@ function toNullableDate(value?: string | null): Date | null | undefined {
 }
 
 /**
- * The first digit in a free-text year level ("4th Year" -> 4), matching the
- * heuristic the `training_assignment_foundation` migration's backfill used —
- * see `resolveCourseFields`'s comment for why this string is the only place a
- * student's numeric year level can come from without a schema change.
+ * "4th Year" for 4, "1st Year" for 1, etc. — the display form
+ * `resolveCourseFields` writes into the deprecated free-text `yearLevel`
+ * column whenever a structured `courseYearLevel` is set, so screens still
+ * reading that column show something readable instead of a bare digit.
  */
-function parseYearLevel(value: string | null): number | null {
-  if (!value) return null;
-  const match = value.match(/\d/);
-  return match ? Number(match[0]) : null;
+function ordinalYearLabel(n: number): string {
+  const mod100 = n % 100;
+  const suffix =
+    mod100 >= 11 && mod100 <= 13
+      ? 'th'
+      : n % 10 === 1
+        ? 'st'
+        : n % 10 === 2
+          ? 'nd'
+          : n % 10 === 3
+            ? 'rd'
+            : 'th';
+  return `${n}${suffix} Year`;
 }
 
 /**
@@ -1410,6 +1522,7 @@ function studentProfileData(data: StudentDetails) {
     course: data.course,
     yearLevel: data.yearLevel,
     courseId: data.courseId,
+    courseYearLevel: data.courseYearLevel,
     blockId: data.blockId,
     establishmentId: data.establishmentId,
     requiredHours: data.requiredHours,

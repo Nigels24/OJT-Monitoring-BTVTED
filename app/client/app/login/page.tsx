@@ -34,6 +34,17 @@ const ROLE_OPTIONS: TabOption<Role>[] = [
   { key: "Coordinator", label: "Coordinator", icon: IdCard },
 ];
 
+/** Read once at mount, same reasoning as the `next` param below: avoids opting the page out of prerendering via useSearchParams(). */
+function readSignOutReason(): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("reason");
+}
+
+const SIGN_OUT_MESSAGE: Record<string, string> = {
+  idle: "You were signed out after 30 minutes of inactivity.",
+  expired: "Your session expired. Please sign in again.",
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const [login, { isLoading }] = useLoginMutation();
@@ -47,6 +58,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showForgotHelp, setShowForgotHelp] = useState(false);
+  const [signOutReason] = useState(readSignOutReason);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +74,14 @@ export default function LoginPage() {
       }
 
       persistSession(result.accessToken, user);
+
+      // A coordinator-issued temporary password forces the standalone
+      // change-password page before anything else — even a `next` the user
+      // was originally headed for.
+      if (user.mustChangePassword) {
+        router.push("/change-password");
+        return;
+      }
 
       // `proxy.ts` adds ?next=... when it bounces an unauthenticated visitor
       // off a protected page. Honour it, but only within this role's own
@@ -92,6 +112,12 @@ export default function LoginPage() {
       <p className="text-center text-gray-500 text-sm mt-1 mb-6">
         {SCHOOL_NAME}
       </p>
+
+      {signOutReason && SIGN_OUT_MESSAGE[signOutReason] && (
+        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-center">
+          {SIGN_OUT_MESSAGE[signOutReason]}
+        </p>
+      )}
 
       <Tabs
         options={ROLE_OPTIONS}

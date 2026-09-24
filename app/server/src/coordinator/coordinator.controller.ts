@@ -58,9 +58,14 @@ class CreateSupervisorDto {
   @Matches(USERNAME_PATTERN, { message: USERNAME_MESSAGE })
   username!: string;
 
+  // Optional: omit it and the service generates a readable temporary
+  // password, returned once in the response as `temporaryPassword`. Either
+  // way the account is created with mustChangePassword = true (the schema
+  // default), so the first sign-in always forces a real change.
+  @IsOptional()
   @IsString()
   @MinLength(8)
-  password!: string;
+  password?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -149,15 +154,14 @@ class StudentDetailsDto {
   @MaxLength(30)
   yearLevel?: string | null;
 
-  // The structured counterparts to `course`/`yearLevel` above. When set, the
-  // service also derives fresh values for those two deprecated free-text
-  // columns (course name, and String(courseYearLevel)) so screens that still
-  // read them keep rendering something sensible — see
-  // `coordinator.service.ts`'s `studentProfileData`. Named `courseYearLevel`,
-  // not `yearLevel`, only because that name is already taken by the free-text
-  // field above; there is no separate stored column for it; it is folded into
-  // the deprecated `yearLevel` string and read back from there by
-  // `getPlacementDefaults`.
+  // The structured counterparts to `course`/`yearLevel` above, stored on
+  // their own columns (`courseId`/`courseYearLevel`). When set, the service
+  // also derives a fresh value for the deprecated `course`/`yearLevel`
+  // free-text columns so screens that still read them keep rendering
+  // something sensible — see `coordinator.service.ts`'s
+  // `resolveCourseFields`/`studentProfileData`. Named `courseYearLevel`, not
+  // `yearLevel`, only because that name is already taken by the free-text
+  // field above.
   @IsOptional()
   @EmptyToNull()
   @IsString()
@@ -209,14 +213,18 @@ class CreateStudentDto extends StudentDetailsDto {
   @IsEmail()
   email!: string;
 
-  // The coordinator issues both credentials by hand and passes them to the
-  // student. This replaced an earlier server-generated temporary password.
+  // The coordinator issues the username by hand and passes it to the
+  // student.
   @Matches(USERNAME_PATTERN, { message: USERNAME_MESSAGE })
   username!: string;
 
+  // Optional: omit it and the service generates a readable temporary
+  // password, returned once in the response as `temporaryPassword` — see
+  // CreateSupervisorDto's `password` for the same behavior.
+  @IsOptional()
   @IsString()
   @MinLength(8)
-  password!: string;
+  password?: string;
 
   // Only needed when first/last name are not supplied; the service composes
   // User.name from the name parts when it can.
@@ -488,6 +496,20 @@ export class CoordinatorController {
     @Body() dto: ResetPasswordDto,
   ) {
     return this.coordinatorService.resetSupervisorPassword(id, dto.password);
+  }
+
+  /**
+   * System-generated recovery path, keyed by User id (not the student's or
+   * supervisor's own profile id) since it's the same operation for either
+   * role — see `CoordinatorService.resetPasswordForUser`. Unlike the two
+   * handlers above, the coordinator supplies nothing: a readable temporary
+   * password is generated server-side and returned once as
+   * `temporaryPassword`, the same shape `createStudent`/`createSupervisor`
+   * return when their own `password` field is omitted.
+   */
+  @Post('users/:userId/reset-password')
+  resetUserPassword(@Param('userId') userId: string) {
+    return this.coordinatorService.resetPasswordForUser(userId);
   }
 
   @Delete('supervisors/:id')
