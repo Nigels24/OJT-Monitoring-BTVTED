@@ -21,12 +21,8 @@ import {
   MAX_UPLOAD_SIZE_BYTES,
   validateUpload,
 } from '../common/file-upload';
-import {
-  buildObjectPath,
-  deleteFile,
-  getSignedUrl,
-  uploadFile,
-} from '../common/storage';
+import { buildObjectPath, deleteFile, uploadFile } from '../common/storage';
+import { signedUrlOrNull } from '../common/signed-url';
 import { journalEstablishmentWhere } from '../common/supervisor-scope';
 
 /** A journal entry may carry at most this many photographs. */
@@ -520,6 +516,10 @@ export class JournalService {
    * `Student.establishmentId`: a trainee who transfers away takes their new
    * establishment's journal with them, and the days they wrote up *here* stay
    * visible to the supervisor who witnessed them.
+   *
+   * `coordinatorRemarks` is stripped from everything this role sees (see
+   * `withoutCoordinatorRemarks`): the supervisor gets the status, not the
+   * school's written feedback to its own student.
    */
   async listForSupervisor(
     userId: string,
@@ -537,10 +537,12 @@ export class JournalService {
       orderBy: { entryDate: 'desc' },
     });
 
-    return entries.map(({ _count, ...entry }) => ({
-      ...toListRow(entry),
-      photoCount: _count.photos,
-    }));
+    return entries.map(({ _count, ...entry }) =>
+      withoutCoordinatorRemarks({
+        ...toListRow(entry),
+        photoCount: _count.photos,
+      }),
+    );
   }
 
   async getForSupervisor(userId: string, entryId: string) {
@@ -553,7 +555,8 @@ export class JournalService {
         'That journal entry belongs to a different establishment',
       );
     }
-    return this.withSignedPhotos(entry, { canEdit: false });
+    const signed = await this.withSignedPhotos(entry, { canEdit: false });
+    return withoutCoordinatorRemarks(signed);
   }
 
   /* ---------------------------------------------------------------------
@@ -806,34 +809,27 @@ export class JournalService {
   /**
    * Swaps each photo's stored path for a short-lived signed URL.
    *
-   * Never throws: a missing object yields `url: null` so that one photo renders
-   * as unavailable instead of taking the whole entry down — the same rule
-   * `withSignedUrl` follows for documents (CLAUDE.md §8).
+   * Two URLs per photo, because they are used for two different things: `url`
+   * serves the object inline (the gallery renders it in an `<img>`), while
+   * `downloadUrl` carries the conventional filename so saving it produces
+   * `2022-00145_JOURNAL_20260915_1_MUNDO.jpg` rather than the bucket's uuid key.
+   *
+   * Never throws: a missing object yields `null` so that one photo renders as
+   * unavailable instead of taking the whole entry down (CLAUDE.md §8).
    */
   private async withSignedPhotos<
     T extends {
-      photos: { id: string; storagePath: string }[];
+      photos: { id: string; storagePath: string; originalName: string }[];
     },
   >(entry: T, extra: { canEdit: boolean }) {
     const photos = await Promise.all(
       entry.photos.map(async ({ storagePath, ...photo }) => ({
         ...photo,
-        url: await this.signedUrlOrNull(storagePath),
+        url: await signedUrlOrNull(storagePath),
+        downloadUrl: await signedUrlOrNull(storagePath, photo.originalName),
       })),
     );
     return { ...entry, photos, ...extra };
-  }
-
-  private async signedUrlOrNull(path: string): Promise<string | null> {
-    try {
-      return await getSignedUrl(path);
-    } catch (err) {
-      this.logger.error(
-        `No signed URL for journal photo "${path}" — the row survives with url: null: ` +
-          (err instanceof Error ? err.message : String(err)),
-      );
-      return null;
-    }
   }
 
   /** Best-effort: an orphaned object wastes a few KB, a failed request costs more. */
@@ -863,6 +859,22 @@ const ASSIGNMENT_SELECT = {
   endDate: true,
   establishment: { select: { id: true, name: true } },
 } as const;
+
+/**
+ * Drops the coordinator's written feedback from a response.
+ *
+ * Applied to everything the *supervisor* sees. The status (accepted, returned,
+ * awaiting review) is useful context for the company that witnessed the work,
+ * but the remarks are the school's feedback to its own student — an internal
+ * conversation the placement host is not part of. Stripped server-side rather
+ * than merely hidden in the UI, so the field never leaves the API.
+ */
+function withoutCoordinatorRemarks<T extends { coordinatorRemarks: unknown }>(
+  entry: T,
+): Omit<T, 'coordinatorRemarks'> {
+  const { coordinatorRemarks, ...rest } = entry;
+  return rest;
+}
 
 /** SUBMITTED and RETURNED are the student's to change; ACCEPTED is signed off. */
 function isEditable(status: JournalStatus): boolean {

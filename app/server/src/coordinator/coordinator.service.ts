@@ -34,7 +34,6 @@ import {
   evaluationPdfFilename,
   renderEvaluationPdf,
 } from '../common/evaluation-pdf';
-import { DOCUMENT_INCLUDE, withSignedUrl } from '../student/student.service';
 import {
   CASCADE_TRANSACTION_OPTIONS,
   deleteStudentCascade,
@@ -1190,47 +1189,6 @@ export class CoordinatorService {
       username: user.username,
       temporaryPassword,
     };
-  }
-
-  /** Every document across every establishment — read/review oversight. */
-  async getDocuments() {
-    const documents = await this.prisma.client.document.findMany({
-      include: DOCUMENT_INCLUDE,
-      orderBy: { uploadedAt: 'desc' },
-    });
-
-    return Promise.all(documents.map(withSignedUrl));
-  }
-
-  async reviewDocument(
-    userId: string,
-    documentId: string,
-    status: 'APPROVED' | 'REJECTED',
-    reviewNote?: string,
-  ) {
-    const coordinator = await this.getCoordinatorByUserId(userId);
-
-    const document = await this.prisma.client.document.findUnique({
-      where: { id: documentId },
-    });
-    if (!document) {
-      throw new NotFoundException('Document not found');
-    }
-
-    const updated = await this.prisma.client.document.update({
-      where: { id: documentId },
-      data: {
-        status,
-        // Only meaningful for a rejection; a later approval should not still
-        // carry the reason it was once rejected for.
-        reviewNote: status === 'REJECTED' ? reviewNote : null,
-        reviewedById: coordinator.id,
-        reviewedAt: new Date(),
-      },
-      include: DOCUMENT_INCLUDE,
-    });
-
-    return withSignedUrl(updated);
   }
 
   private async getCoordinatorByUserId(userId: string) {

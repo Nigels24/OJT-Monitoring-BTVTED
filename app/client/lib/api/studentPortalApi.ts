@@ -104,14 +104,50 @@ export interface UpdateProfileRequest {
 
 export type DocumentStatus = "PENDING" | "APPROVED" | "REJECTED";
 
+/** Which phase of the placement a required document belongs to (thesis Table 3). */
+export type DocumentStage = "APPLICATION" | "ACCEPTANCE" | "COMPLETION";
+
+export const DOCUMENT_STAGE_LABEL: Record<DocumentStage, string> = {
+  APPLICATION: "Application",
+  ACCEPTANCE: "Acceptance",
+  COMPLETION: "Completion",
+};
+
+/**
+ * A cell/checklist state.
+ *
+ * `DECLINED` is what a REJECTED document reads as in the checklist (the stored
+ * status keeps its own word); `NOT_APPLICABLE` is a per-assignment requirement
+ * for a student with no active placement — not missing, just not due yet.
+ */
+export type RequirementState =
+  | "MISSING"
+  | "PENDING"
+  | "APPROVED"
+  | "DECLINED"
+  | "NOT_APPLICABLE";
+
+export interface DocumentRequirement {
+  id: string;
+  /** Short identifier the stored filename carries, e.g. "MOA". */
+  code: string;
+  name: string;
+  stage: DocumentStage;
+  /** True = one per placement (endorsement, MOA, waiver, portfolio). */
+  perAssignment: boolean;
+}
+
 export interface StudentDocument {
   id: string;
-  name: string;
-  /** A freshly minted 1-hour signed URL, never the raw storage path. */
   /**
-   * Short-lived signed URL, minted per request. `null` when the stored object
-   * is missing — the row is shown as unavailable rather than the whole list
-   * failing to load.
+   * The system-applied filename (`2022-00145_MOA_MUNDO.pdf`), or the free text
+   * typed before Table 3 existed for a legacy upload.
+   */
+  name: string;
+  /**
+   * Short-lived signed URL that downloads under `name`. `null` when the stored
+   * object is missing — the row is shown as unavailable rather than the whole
+   * list failing to load.
    */
   fileUrl: string | null;
   status: DocumentStatus;
@@ -119,7 +155,27 @@ export interface StudentDocument {
   reviewNote: string | null;
   reviewedAt: string | null;
   uploadedAt: string;
+  requirement: DocumentRequirement | null;
+  uploadedBy: { id: string; name: string; role: string } | null;
 }
+
+/** One row of the student's checklist: a requirement and what satisfies it. */
+export interface ChecklistRow {
+  requirement: DocumentRequirement;
+  /** False for a per-assignment requirement with no active placement yet. */
+  applicable: boolean;
+  state: RequirementState;
+  document: StudentDocument | null;
+}
+
+export interface DocumentChecklist {
+  hasActiveAssignment: boolean;
+  establishment: { id: string; name: string } | null;
+  stages: { stage: DocumentStage; requirements: ChecklistRow[] }[];
+  /** Legacy uploads, and anything the backfill could not map to a requirement. */
+  otherUploads: StudentDocument[];
+}
+
 
 /** Mirrors the server's CREDENTIAL_TYPES — no Prisma enum, so keep both lists in sync by hand. */
 export const CREDENTIAL_TYPES = [
@@ -192,11 +248,16 @@ export const studentPortalApi = createApi({
       // and address too, so it goes stale alongside the profile.
       invalidatesTags: ["MyProfile", "MyDashboard"],
     }),
-    getMyDocuments: builder.query<StudentDocument[], void>({
+    /**
+     * The Table 3 checklist: every active requirement with its state, plus any
+     * legacy uploads. Replaced the old flat document list — which requirement a
+     * per-placement document satisfies is a server-side rule.
+     */
+    getMyDocuments: builder.query<DocumentChecklist, void>({
       query: () => "/student/documents",
       providesTags: ["MyDocuments"],
     }),
-    /** `body` is a FormData with `name` and `file` fields — see the Documents upload form. */
+    /** `body` is a FormData with `requirementId` and `file`; the system names the file. */
     uploadDocument: builder.mutation<StudentDocument, FormData>({
       query: (body) => ({
         url: "/student/documents",

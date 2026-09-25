@@ -19,13 +19,13 @@ import {
   ZERO_ASSIGNMENT_PROGRESS,
 } from '../common/assignment-progress';
 import { assertDutyDay } from '../common/duty-days';
-import { assertValidDocumentUpload } from '../common/file-upload';
 import {
-  buildObjectPath,
-  deleteFile,
-  getSignedUrl,
-  uploadFile,
-} from '../common/storage';
+  buildStorageName,
+  MAX_UPLOAD_SIZE_BYTES,
+  validateUpload,
+} from '../common/file-upload';
+import { buildObjectPath, deleteFile, uploadFile } from '../common/storage';
+import { extensionOf, withSignedUrl } from '../common/signed-url';
 
 interface SubmitAttendanceInput {
   date: string;
@@ -40,10 +40,6 @@ interface UpdateProfileInput {
   /** `null` = explicitly cleared; `undefined` = not supplied, leave unchanged. */
   contactNumber?: string | null;
   address?: string | null;
-}
-
-interface UploadDocumentInput {
-  name: string;
 }
 
 interface UploadCredentialInput {
@@ -65,21 +61,6 @@ export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
 const PROFILE_INCLUDE = {
   user: { select: { id: true, email: true, name: true } },
   establishment: { select: { id: true, name: true } },
-} as const;
-
-/** Shared with `coordinator.service.ts` — the reviewer's cross-establishment list. */
-export const DOCUMENT_INCLUDE = {
-  student: {
-    select: {
-      id: true,
-      studentIdNumber: true,
-      user: { select: { name: true } },
-      establishment: { select: { id: true, name: true } },
-    },
-  },
-  reviewedBy: {
-    select: { id: true, user: { select: { name: true } } },
-  },
 } as const;
 
 @Injectable()
@@ -109,6 +90,9 @@ export class StudentService {
   private async getStudentByUserId(userId: string) {
     const student = await this.prisma.client.student.findUnique({
       where: { userId },
+      // `user.name` is the fallback surname for a credential's conventional
+      // filename when `lastName` is null (rows predating that column).
+      include: { user: { select: { name: true } } },
     });
     if (!student) {
       throw new NotFoundException('Student profile not found');
@@ -385,91 +369,32 @@ export class StudentService {
     });
   }
 
-  async uploadDocument(
-    userId: string,
-    data: UploadDocumentInput,
-    file: Express.Multer.File | undefined,
-  ) {
-    const student = await this.getStudentByUserId(userId);
-    assertValidDocumentUpload(file);
-
-    // Nullable, and deliberately not required: the thesis has students
-    // uploading an application letter/resume BEFORE they are placed anywhere,
-    // so a document must still be uploadable with no ACTIVE assignment to
-    // attach to.
-    const activeAssignment =
-      await this.prisma.client.trainingAssignment.findFirst({
-        where: { studentId: student.id, status: 'ACTIVE' },
-        select: { id: true },
-      });
-
-    const path = buildObjectPath('documents', student.id, file.originalname);
-    await uploadFile(path, file.buffer, file.mimetype);
-
-    const created = await this.prisma.client.document.create({
-      data: {
-        studentId: student.id,
-        name: data.name,
-        fileUrl: path,
-        status: 'PENDING',
-        trainingAssignmentId: activeAssignment?.id,
-      },
-    });
-
-    return withSignedUrl(created);
-  }
-
-  async getMyDocuments(userId: string) {
-    const student = await this.getStudentByUserId(userId);
-
-    const documents = await this.prisma.client.document.findMany({
-      where: { studentId: student.id },
-      orderBy: { uploadedAt: 'desc' },
-    });
-
-    return Promise.all(documents.map(withSignedUrl));
-  }
-
-  async deleteDocument(userId: string, documentId: string) {
-    const student = await this.getStudentByUserId(userId);
-
-    const document = await this.prisma.client.document.findUnique({
-      where: { id: documentId },
-    });
-    if (!document) {
-      throw new NotFoundException('Document not found');
-    }
-    if (document.studentId !== student.id) {
-      throw new ForbiddenException('This document does not belong to you');
-    }
-    // Once a coordinator has acted on it, the review record (and any note the
-    // student was given) should stay put rather than silently disappear.
-    if (document.status !== 'PENDING') {
-      throw new ConflictException(
-        'Only a document still pending review can be deleted',
-      );
-    }
-
-    // Row first, then the object — the same order the cascade deletes use
-    // (CLAUDE.md §6). Reversed, a storage success followed by a failed row
-    // delete leaves a row pointing at nothing, which is the state that used to
-    // 500 the whole documents list.
-    await this.prisma.client.document.delete({ where: { id: documentId } });
-    await this.deleteStoredObject(document.fileUrl, `document ${documentId}`);
-
-    return { id: documentId, deleted: true };
-  }
-
+  /**
+   * Stores one credential.
+   *
+   * Credentials stay student-level and outside the Table 3 checklist (they have
+   * no review lifecycle and no per-assignment rule), but they now share the
+   * documents' two file rules: the real type comes from the content signature,
+   * and the stored name follows the school's convention so a download is
+   * identifiable without opening it.
+   */
   async uploadCredential(
     userId: string,
     data: UploadCredentialInput,
     file: Express.Multer.File | undefined,
   ) {
     const student = await this.getStudentByUserId(userId);
-    assertValidDocumentUpload(file);
+    const validated = validateUpload(file?.buffer, {
+      allowed: ['pdf', 'jpg', 'png'],
+      maxBytes: MAX_UPLOAD_SIZE_BYTES,
+    });
 
-    const path = buildObjectPath('credentials', student.id, file.originalname);
-    await uploadFile(path, file.buffer, file.mimetype);
+    const path = buildObjectPath(
+      'credentials',
+      student.id,
+      credentialFileName(student, data.type, validated.ext),
+    );
+    await uploadFile(path, file!.buffer, validated.mimeType);
 
     const created = await this.prisma.client.credential.create({
       data: {
@@ -479,7 +404,7 @@ export class StudentService {
       },
     });
 
-    return withSignedUrl(created);
+    return withSignedUrl(created, credentialDownloadName(student, created));
   }
 
   async getMyCredentials(userId: string) {
@@ -490,7 +415,11 @@ export class StudentService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return Promise.all(credentials.map(withSignedUrl));
+    return Promise.all(
+      credentials.map((credential) =>
+        withSignedUrl(credential, credentialDownloadName(student, credential)),
+      ),
+    );
   }
 
   async deleteCredential(userId: string, credentialId: string) {
@@ -521,33 +450,58 @@ export class StudentService {
   }
 }
 
-/** Replaces the stored object path with a freshly minted signed URL. */
 /**
- * Swaps a stored object path for a short-lived signed URL.
- *
- * Never throws. A missing object yields `fileUrl: null` so the row still
- * renders as "unavailable" — these run under `Promise.all` across a whole list
- * (`getMyDocuments`, `getMyCredentials`, the coordinator's `getDocuments`), and
- * a throw there took out the entire page for every student rather than the one
- * bad row. The likeliest cause is a storage object deleted out from under the
- * row, so it is logged loudly and left for someone to clean up.
+ * The conventional name for a credential: `StudentNo_TYPE_SURNAME.ext`, the same
+ * convention Table 3 documents follow, with the credential's own type as the
+ * code (`2022-00145_MEDICAL_CERTIFICATE_MUNDO.pdf`).
  */
-export async function withSignedUrl<T extends { fileUrl: string }>(
-  record: T,
-): Promise<T & { fileUrl: string | null }> {
-  try {
-    return { ...record, fileUrl: await getSignedUrl(record.fileUrl) };
-  } catch (err) {
-    storageLogger.error(
-      `No signed URL for stored object "${record.fileUrl}" — the row survives with fileUrl: null: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
-    return { ...record, fileUrl: null };
-  }
+function credentialFileName(
+  student: {
+    studentIdNumber: string;
+    lastName: string | null;
+    user?: { name: string };
+  },
+  type: string,
+  ext: string,
+): string {
+  return buildStorageName({
+    studentNumber: student.studentIdNumber,
+    code: type,
+    surname: credentialSurname(student),
+    ext,
+  });
 }
 
-/** Module-scope: `withSignedUrl` is a free function, not part of the service. */
-const storageLogger = new Logger('StorageSignedUrl');
+/**
+ * What a credential download saves as. Derived from the stored path's extension
+ * rather than a column — `Credential` has no `mimeType`, and rows written before
+ * the content check exists only carry the extension in their path.
+ */
+function credentialDownloadName(
+  student: {
+    studentIdNumber: string;
+    lastName: string | null;
+    user?: { name: string };
+  },
+  credential: { type: string; fileUrl: string },
+): string {
+  return credentialFileName(
+    student,
+    credential.type,
+    extensionOf(credential.fileUrl),
+  );
+}
+
+/** `Student.lastName` is nullable, so fall back to the display name's last word. */
+function credentialSurname(student: {
+  lastName: string | null;
+  user?: { name: string };
+}): string {
+  const explicit = student.lastName?.trim();
+  if (explicit) return explicit;
+  const parts = (student.user?.name ?? '').trim().split(/\s+/);
+  return parts[parts.length - 1] || 'STUDENT';
+}
 
 /** Adds the derived hours so the client never recomputes them. */
 function withHours<T extends Parameters<typeof hoursForAttendance>[0]>(

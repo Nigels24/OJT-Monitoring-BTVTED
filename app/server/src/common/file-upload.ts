@@ -1,52 +1,21 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * Upload rules shared by every student-owned file (journal photos now,
- * documents and credentials as they move over).
+ * Upload rules shared by every student-owned file — documents, credentials and
+ * journal photos.
  *
- * Two layers live here, and they are deliberately not the same check:
+ * `validateUpload` is the only file check left: it reads the buffer's leading
+ * bytes and ignores whatever extension or Content-Type the client claimed. The
+ * earlier `assertValidDocumentUpload`, which trusted the multipart part's own
+ * `mimetype` header, is gone — a `.jpg` that is really a PDF (or a renamed
+ * executable) passed it, and the bucket serves these files back to other users.
  *
- * - `assertValidDocumentUpload` is the **pre-existing** documents/credentials
- *   rule, moved here verbatim from `student.service.ts` so it is stated once:
- *   it trusts the multipart part's own `mimetype` header.
- * - `validateUpload` is the **content-based** rule: it reads the buffer's magic
- *   bytes and ignores whatever extension or Content-Type the client claimed.
- *   A `.jpg` that is really a PDF (or a renamed executable) fails here and
- *   passes the header-based check above.
- *
- * New features use `validateUpload`. Documents and credentials keep the header
- * check until Step 7 moves them over, so this step changes nothing about what
- * those two endpoints accept.
+ * `buildStorageName` is the other half: the school's naming convention, applied
+ * by the system rather than taken from the client's filename.
  */
 
 /** 10MB, the ceiling for every student-uploaded file. */
 export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
-
-/** What the documents/credentials endpoints accept, by claimed mimetype. */
-export const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf',
-  'image/png',
-  'image/jpeg',
-]);
-
-/**
- * The documents/credentials file check, unchanged from where it used to live
- * inline in `StudentService`. Asserts the part exists, its claimed mimetype is
- * one of the three accepted, and it is within the size ceiling.
- */
-export function assertValidDocumentUpload(
-  file: Express.Multer.File | undefined,
-): asserts file is Express.Multer.File {
-  if (!file) {
-    throw new BadRequestException('A file is required');
-  }
-  if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
-    throw new BadRequestException('Only PDF, PNG or JPEG files are accepted');
-  }
-  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
-    throw new BadRequestException('File must be 10MB or smaller');
-  }
-}
 
 export type UploadKind = 'pdf' | 'jpg' | 'png';
 

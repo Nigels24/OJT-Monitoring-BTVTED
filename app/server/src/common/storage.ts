@@ -61,14 +61,28 @@ export async function uploadFile(
   }
 }
 
-/** Mints a time-limited URL for a stored object path. Never store the result. */
+/**
+ * Mints a time-limited URL for a stored object path. Never store the result.
+ *
+ * `downloadName` sets Supabase's `download` option, which makes the response
+ * carry `Content-Disposition: attachment; filename=...`. Callers pass the
+ * school's conventional name (`StudentNo_CODE_SURNAME.ext`) so a saved file is
+ * identifiable without opening it — the bucket key itself is a uuid and would
+ * otherwise be what the browser saved. Omit it to serve the object inline, which
+ * is what an image being rendered in a page wants.
+ */
 export async function getSignedUrl(
   path: string,
   expiresInSeconds: number = DEFAULT_SIGNED_URL_TTL_SECONDS,
+  downloadName?: string,
 ): Promise<string> {
   const { data, error } = await getClient()
     .storage.from(BUCKET)
-    .createSignedUrl(path, expiresInSeconds);
+    .createSignedUrl(
+      path,
+      expiresInSeconds,
+      downloadName ? { download: downloadName } : undefined,
+    );
   if (error || !data) {
     throw new Error(
       `Failed to create signed URL: ${error?.message ?? 'unknown error'}`,

@@ -3,68 +3,98 @@ import {
   useGetMyDocumentsQuery,
   useUploadDocumentMutation,
   useDeleteDocumentMutation,
-  StudentDocument,
+  type ChecklistRow,
+  type StudentDocument,
 } from "@/lib/api/studentPortalApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 
-const EMPTY_FORM = { name: "" };
+/** What the server accepts, pre-checked so a doomed upload fails faster. */
+const ACCEPTED_MIME_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
-export type DocumentFormValues = typeof EMPTY_FORM;
-
+/**
+ * The student's required-documents checklist (thesis Table 3).
+ *
+ * Uploading is per requirement — there is no free-text name any more, because
+ * the system names the file (`StudentNo_CODE_SURNAME.ext`) from the requirement
+ * and the student's own record. Re-uploading a pending or returned requirement
+ * replaces the file server-side; an approved one is refused there with a clear
+ * message, which is why the button reads "Replace" only while that is allowed.
+ */
 export function useDocuments() {
-  const { data: documents, isLoading } = useGetMyDocumentsQuery();
+  const { data: checklist, isLoading, isError } = useGetMyDocumentsQuery();
   const [uploadDocument, { isLoading: isUploading }] =
     useUploadDocumentMutation();
   const [deleteDocument, { isLoading: isDeleting }] =
     useDeleteDocumentMutation();
+  const { showSuccess, showError } = useSnackbar();
 
-  const [form, setForm] = useState<DocumentFormValues>(EMPTY_FORM);
+  /** The requirement whose upload dialog is open. */
+  const [uploadTarget, setUploadTarget] = useState<ChecklistRow | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<StudentDocument | null>(
     null,
   );
-  const { showSuccess, showError } = useSnackbar();
 
-  const setField =
-    (key: keyof DocumentFormValues) => (e: { target: { value: string } }) => {
-      setForm((f) => ({ ...f, [key]: e.target.value }));
-    };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] ?? null);
+  const openUpload = (row: ChecklistRow) => {
+    setUploadTarget(row);
+    setFile(null);
+    setError("");
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const closeUpload = () => {
+    setUploadTarget(null);
+    setFile(null);
     setError("");
+  };
 
-    if (!form.name.trim()) {
-      setError("Give the document a name.");
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0] ?? null;
+    e.target.value = "";
+    if (!picked) return;
+
+    // The server checks the file's real leading bytes; this only spares the
+    // student an upload that was never going to be accepted.
+    if (!ACCEPTED_MIME_TYPES.includes(picked.type)) {
+      setError("Choose a PDF, JPG or PNG file.");
+      setFile(null);
       return;
     }
+    if (picked.size > MAX_FILE_SIZE_BYTES) {
+      setError("That file is larger than 10MB.");
+      setFile(null);
+      return;
+    }
+    setError("");
+    setFile(picked);
+  };
+
+  const handleUploadConfirm = async () => {
+    if (!uploadTarget) return;
     if (!file) {
       setError("Choose a file to upload.");
       return;
     }
 
     const body = new FormData();
-    body.append("name", form.name.trim());
+    body.append("requirementId", uploadTarget.requirement.id);
     body.append("file", file);
 
     try {
       await uploadDocument(body).unwrap();
-      setForm(EMPTY_FORM);
-      setFile(null);
-      showSuccess("Document uploaded and sent for review.");
+      showSuccess(
+        `${uploadTarget.requirement.name} uploaded and sent for review.`,
+      );
+      closeUpload();
     } catch (err: unknown) {
-      const message = readError(err, "Failed to upload document.");
+      const message = readError(err, "Failed to upload the document.");
       setError(message);
       showError(message);
     }
   };
 
-  const openDelete = (doc: StudentDocument) => setDeleteTarget(doc);
+  const openDelete = (document: StudentDocument) => setDeleteTarget(document);
   const closeDelete = () => setDeleteTarget(null);
 
   const handleDeleteConfirm = async () => {
@@ -78,19 +108,34 @@ export function useDocuments() {
     }
   };
 
+  const allRows = (checklist?.stages ?? []).flatMap(
+    (stage) => stage.requirements,
+  );
+  const summary = {
+    total: allRows.filter((row) => row.applicable).length,
+    approved: allRows.filter((row) => row.state === "APPROVED").length,
+    pending: allRows.filter((row) => row.state === "PENDING").length,
+    missing: allRows.filter((row) => row.state === "MISSING").length,
+    returned: allRows.filter((row) => row.state === "DECLINED").length,
+  };
+
   return {
-    documents,
+    checklist,
+    summary,
     isLoading,
-    form,
+    isError,
+
+    uploadTarget,
     file,
     error,
     isUploading,
     deleteTarget,
     isDeleting,
 
-    setField,
+    openUpload,
+    closeUpload,
     handleFileChange,
-    handleSubmit,
+    handleUploadConfirm,
     openDelete,
     closeDelete,
     handleDeleteConfirm,

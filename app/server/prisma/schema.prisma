@@ -59,6 +59,13 @@ enum JournalStatus {
   RETURNED
 }
 
+/// Which phase of the placement a required document belongs to (thesis Table 3).
+enum DocumentStage {
+  APPLICATION
+  ACCEPTANCE
+  COMPLETION
+}
+
 enum NotificationType {
   ATTENDANCE_APPROVED
   ATTENDANCE_DECLINED
@@ -97,6 +104,11 @@ model User {
   conversations ConversationParticipant[]
   messagesSent  Message[]
   notifications Notification[]
+
+  /// Documents this account uploaded — the student's own, or a coordinator's
+  /// upload on a student's behalf. Keyed to User, not Student/Coordinator,
+  /// because either role can be the uploader.
+  uploadedDocuments Document[]
 }
 
 model Establishment {
@@ -436,13 +448,58 @@ model Attendance {
   @@index([trainingAssignmentId])
 }
 
+/// One of the school's required documents (thesis Table 3), as data rather than a
+/// hardcoded list — the same call the evaluation sheet makes (CLAUDE.md §9), so a
+/// coordinator can retire or re-order a requirement without a migration.
+///
+/// `code` is the short identifier the system-applied filename carries
+/// (`2022-00145_MOA_MUNDO.pdf`), so it must stay filename-safe and is the key
+/// every seed and backfill matches on. Retiring a requirement is
+/// `isActive: false`, never a delete: documents already uploaded against it keep
+/// pointing at it.
+model DocumentRequirement {
+  id        String        @id @default(cuid())
+  code      String        @unique
+  name      String
+  stage     DocumentStage
+  /// Display order within the stage; the stage itself orders by the enum.
+  sortOrder Int
+  isActive  Boolean       @default(true)
+
+  /// True = one per training assignment (an endorsement letter, MOA and waiver
+  /// belong to a *placement*, and a transferred student needs new ones). False =
+  /// one per student for good (an application letter and resume are the
+  /// student's own, written before they are placed anywhere).
+  perAssignment Boolean
+
+  documents Document[]
+}
+
 model Document {
   id        String  @id @default(cuid())
   studentId String
   student   Student @relation(fields: [studentId], references: [id])
+  /// The system-applied filename (`StudentNo_CODE_SURNAME.ext`) for anything
+  /// uploaded against a requirement — identifiable without opening it, and what
+  /// a download saves as. Legacy rows (`requirementId` null) still hold the
+  /// free text the student typed before Table 3 existed.
   name      String
   fileUrl   String
   status    String  @default("PENDING")
+
+  /// Which Table 3 requirement this satisfies. Nullable for rows uploaded before
+  /// the checklist existed and for anything the backfill could not map — those
+  /// surface as "Other uploads" rather than being deleted or guessed at.
+  requirementId String?
+  requirement   DocumentRequirement? @relation(fields: [requirementId], references: [id])
+
+  /// Who actually uploaded the file: the student themselves, or the coordinator
+  /// uploading on their behalf (the school produces the MOA and endorsement
+  /// letter). Nullable for rows predating this column. Distinct from
+  /// `reviewedById` — the uploader is not necessarily the reviewer, though for a
+  /// coordinator upload (auto-approved) they are the same person.
+  uploadedByUserId String?
+  uploadedBy       User?   @relation(fields: [uploadedByUserId], references: [id])
 
   // Who actioned this review, their note, and when. `reviewNote` is required
   // by the service when status is REJECTED, mirroring
@@ -456,9 +513,15 @@ model Document {
   trainingAssignmentId String?
   trainingAssignment   TrainingAssignment? @relation(fields: [trainingAssignmentId], references: [id])
 
+  /// Refreshed when a PENDING/DECLINED upload is replaced in place, so the review
+  /// queue re-sorts it as new work and the review notification's dedupeKey (which
+  /// uses this value) treats it as a fresh cycle.
   uploadedAt DateTime @default(now())
 
   @@index([trainingAssignmentId])
+  /// Serves both the "has this student satisfied this requirement" lookup on
+  /// upload and the coordinator's status matrix.
+  @@index([studentId, requirementId])
 }
 
 model Credential {

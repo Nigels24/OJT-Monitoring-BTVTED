@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   useGetSupervisorJournalsQuery,
   useGetSupervisorJournalEntryQuery,
-  type JournalListRow,
+  type SupervisorJournalRow,
 } from "@/lib/api/journalApi";
 import { useGetSupervisorStudentsQuery } from "@/lib/api/supervisorApi";
 
@@ -54,7 +54,7 @@ export function useSupervisorJournals() {
     setStudentId,
     setFrom,
     setTo,
-    openDetail: (row: JournalListRow) => setDetailId(row.id),
+    openDetail: (row: SupervisorJournalRow) => setDetailId(row.id),
     closeDetail: () => setDetailId(null),
   };
 }

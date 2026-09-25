@@ -29,7 +29,6 @@ import {
   MaxLength,
   Min,
   MinLength,
-  ValidateIf,
 } from 'class-validator';
 import { CoordinatorService } from './coordinator.service';
 import { Roles, RolesGuard } from '../auth/roles.guard';
@@ -248,21 +247,6 @@ class ResetPasswordDto {
   password!: string;
 }
 
-class ReviewDocumentDto {
-  @IsIn(['APPROVED', 'REJECTED'])
-  status!: 'APPROVED' | 'REJECTED';
-
-  // Required only on rejection — same shape as Attendance's decline reason.
-  // @ValidateIf skips every check below when the condition is false, so an
-  // APPROVED body needs nothing here at all.
-  @ValidateIf((o: ReviewDocumentDto) => o.status === 'REJECTED')
-  @IsString()
-  @IsNotEmpty()
-  @MinLength(3)
-  @MaxLength(500)
-  reviewNote?: string;
-}
-
 class CreatePlacementDto {
   @IsString()
   @IsNotEmpty()
@@ -449,24 +433,8 @@ export class CoordinatorController {
     res.end(body);
   }
 
-  @Get('documents')
-  getDocuments() {
-    return this.coordinatorService.getDocuments();
-  }
-
-  @Patch('documents/:id/review')
-  reviewDocument(
-    @Req() req: AuthedRequest,
-    @Param('id') id: string,
-    @Body() dto: ReviewDocumentDto,
-  ) {
-    return this.coordinatorService.reviewDocument(
-      req.user.userId,
-      id,
-      dto.status,
-      dto.reviewNote,
-    );
-  }
+  // The document queue, the Table 3 status matrix and both upload paths live in
+  // DocumentModule (`coordinator/documents`, `coordinator/students/:id/documents`).
 
   @Patch('students/:id')
   updateStudent(@Param('id') id: string, @Body() dto: UpdateStudentDto) {

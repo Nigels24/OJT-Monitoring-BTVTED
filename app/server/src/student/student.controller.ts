@@ -16,7 +16,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import {
   IsDateString,
   IsIn,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
@@ -79,14 +78,6 @@ class UpdateProfileDto {
 // comes through @UploadedFile() and is validated in the service, not here —
 // forbidNonWhitelisted has no notion of a multipart file part. See CLAUDE.md
 // §7 "File storage — the decided design".
-class UploadDocumentDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(150)
-  name!: string;
-}
-
-// Same multipart shape as documents — see UploadDocumentDto above.
 class UploadCredentialDto {
   @IsIn(CREDENTIAL_TYPES)
   type!: (typeof CREDENTIAL_TYPES)[number];
@@ -126,27 +117,9 @@ export class StudentController {
     return this.studentService.updateProfile(req.user.userId, dto);
   }
 
-  @Post('documents')
-  @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_SIZE_BYTES } }),
-  )
-  uploadDocument(
-    @Req() req: AuthedRequest,
-    @Body() dto: UploadDocumentDto,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    return this.studentService.uploadDocument(req.user.userId, dto, file);
-  }
-
-  @Get('documents')
-  getMyDocuments(@Req() req: AuthedRequest) {
-    return this.studentService.getMyDocuments(req.user.userId);
-  }
-
-  @Delete('documents/:id')
-  deleteDocument(@Req() req: AuthedRequest, @Param('id') id: string) {
-    return this.studentService.deleteDocument(req.user.userId, id);
-  }
+  // Documents live in DocumentModule (`student/documents`): the Table 3
+  // checklist, the naming convention and the per-assignment rule are shared with
+  // the coordinator's upload path, so both go through one service.
 
   @Post('credentials')
   @UseInterceptors(

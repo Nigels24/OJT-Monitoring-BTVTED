@@ -88,9 +88,18 @@ export default function DocumentsReviewTable({
       label: "Document",
       render: (r) => (
         <div>
-          <div className="font-medium text-gray-900">{r.name}</div>
+          <div className="font-medium text-gray-900">
+            {/* The requirement is what the coordinator is reviewing against; the
+                stored filename below identifies the file itself. A legacy upload
+                has no requirement, so its own title is all there is. */}
+            {r.requirement?.name ?? r.name}
+          </div>
+          <div className="text-xs text-gray-500 font-mono truncate max-w-56">
+            {r.requirement ? r.name : "Other upload"}
+          </div>
           <div className="text-xs text-gray-500">
             {new Date(r.uploadedAt).toLocaleDateString()}
+            {r.uploadedBy?.role === "COORDINATOR" && " · uploaded by coordinator"}
           </div>
         </div>
       ),

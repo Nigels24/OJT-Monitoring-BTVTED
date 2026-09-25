@@ -13,7 +13,7 @@ import Overlay from "@/components/ui/Overlay";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/ui/StatusBadge";
 import TextArea from "@/components/ui/TextArea";
-import type { JournalEntryDetail } from "@/lib/api/journalApi";
+import type { JournalDetailView } from "@/lib/api/journalApi";
 import { formatDateOnly, formatWeekdayOnly } from "@/lib/format";
 import {
   JOURNAL_STATUS_LABEL,
@@ -22,8 +22,12 @@ import {
 import JournalPhotoGallery from "./JournalPhotoGallery";
 
 interface JournalDetailDialogProps {
-  /** `null` closes the dialog. */
-  entry: JournalEntryDetail | null;
+  /**
+   * `null` closes the dialog. The supervisor's payload has no
+   * `coordinatorRemarks` at all (stripped server-side), so the remarks block
+   * below simply does not render for that role.
+   */
+  entry: JournalDetailView | null;
   isLoading: boolean;
   onClose: () => void;
   /**

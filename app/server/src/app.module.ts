@@ -16,6 +16,7 @@ import { EvaluationTemplateModule } from './evaluation-template/evaluation-templ
 import { CourseModule } from './course/course.module';
 import { NotificationModule } from './notification/notification.module';
 import { JournalModule } from './journal/journal.module';
+import { DocumentModule } from './document/document.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { JournalModule } from './journal/journal.module';
     CourseModule,
     NotificationModule,
     JournalModule,
+    DocumentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

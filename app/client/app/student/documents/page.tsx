@@ -3,32 +3,25 @@
 import Sidebar from "@/components/layout/Sidebar";
 import PageHeader from "@/components/ui/PageHeader";
 import Card from "@/components/ui/Card";
+import StatCard from "@/components/ui/StatCard";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import { FileText, ClipboardList, Trash2 } from "lucide-react";
+import {
+  FileText,
+  ClipboardList,
+  CheckCircle2,
+  Hourglass,
+  CircleDashed,
+  Trash2,
+} from "lucide-react";
 import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import { STUDENT_NAV } from "@/features/student-portal/nav";
 import { useDocuments } from "@/features/student-portal/hooks/use-documents";
-import DocumentUploadForm from "@/features/student-portal/components/DocumentUploadForm";
-import DocumentsTable from "@/features/student-portal/components/DocumentsTable";
+import DocumentChecklist from "@/features/student-portal/components/DocumentChecklist";
+import DocumentUploadDialog from "@/features/document/components/DocumentUploadDialog";
 
 export default function StudentDocumentsPage() {
   const currentUser = useCurrentUser();
-  const {
-    documents,
-    isLoading,
-    form,
-    file,
-    error,
-    isUploading,
-    deleteTarget,
-    isDeleting,
-    setField,
-    handleFileChange,
-    handleSubmit,
-    openDelete,
-    closeDelete,
-    handleDeleteConfirm,
-  } = useDocuments();
+  const documents = useDocuments();
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -43,55 +36,86 @@ export default function StudentDocumentsPage() {
         <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6">
           <PageHeader
             title="Documents"
-            subtitle="Upload requirements and track their review"
+            subtitle="Upload each required document and track its review"
             icon={FileText}
           />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-          <Card className="xl:col-span-2 h-fit">
-            <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <ClipboardList size={18} className="text-blue-600" />
-              Upload Document
-            </h2>
-            <DocumentUploadForm
-              form={form}
-              file={file}
-              error={error}
-              isSubmitting={isUploading}
-              setField={setField}
-              onFileChange={handleFileChange}
-              onSubmit={handleSubmit}
-            />
-          </Card>
-
-          <Card className="xl:col-span-3">
-            <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <FileText size={18} className="text-blue-600" />
-              My Documents
-            </h2>
-            <DocumentsTable
-              rows={documents ?? []}
-              isLoading={isLoading}
-              onDelete={openDelete}
-            />
-          </Card>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <StatCard
+            label="Approved"
+            value={
+              documents.isError
+                ? "—"
+                : `${documents.summary.approved}/${documents.summary.total}`
+            }
+            icon={CheckCircle2}
+            variant="accent"
+            subtext="requirements complete"
+          />
+          <StatCard
+            label="Pending Review"
+            value={documents.isError ? "—" : documents.summary.pending}
+            icon={Hourglass}
+            subtext="with your coordinator"
+          />
+          <StatCard
+            label="Still Needed"
+            value={
+              documents.isError
+                ? "—"
+                : documents.summary.missing + documents.summary.returned
+            }
+            icon={CircleDashed}
+            subtext={`${documents.summary.returned} returned for changes`}
+          />
         </div>
+
+        <Card>
+          <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <ClipboardList size={18} className="text-blue-600" />
+            Required Documents
+          </h2>
+          <DocumentChecklist
+            checklist={documents.checklist}
+            isLoading={documents.isLoading}
+            isError={documents.isError}
+            onUpload={documents.openUpload}
+            onDelete={documents.openDelete}
+          />
+        </Card>
       </main>
 
+      <DocumentUploadDialog
+        target={
+          documents.uploadTarget
+            ? {
+                requirementName: documents.uploadTarget.requirement.name,
+                replacing: documents.uploadTarget.document !== null,
+              }
+            : null
+        }
+        file={documents.file}
+        error={documents.error}
+        isSubmitting={documents.isUploading}
+        onFileChange={documents.handleFileChange}
+        onConfirm={documents.handleUploadConfirm}
+        onCancel={documents.closeUpload}
+      />
+
       <ConfirmDialog
-        open={!!deleteTarget}
-        title="Delete this document?"
+        open={!!documents.deleteTarget}
+        title="Delete this upload?"
         message={
-          deleteTarget
-            ? `"${deleteTarget.name}" will be permanently removed. This can't be undone.`
+          documents.deleteTarget
+            ? `"${documents.deleteTarget.name}" will be permanently removed. This can't be undone.`
             : ""
         }
-        confirmLabel={isDeleting ? "Deleting..." : "Yes, delete it"}
+        confirmLabel={documents.isDeleting ? "Deleting..." : "Yes, delete it"}
         icon={Trash2}
         variant="danger"
-        onConfirm={handleDeleteConfirm}
-        onCancel={closeDelete}
+        onConfirm={documents.handleDeleteConfirm}
+        onCancel={documents.closeDelete}
       />
     </div>
   );

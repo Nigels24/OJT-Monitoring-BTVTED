@@ -131,6 +131,30 @@ export interface JournalListRow {
   photoCount: number;
 }
 
+/**
+ * What the supervisor's endpoints return: the same rows without the
+ * coordinator's written feedback.
+ *
+ * The server strips `coordinatorRemarks` from both supervisor responses — the
+ * status is useful context for the company that witnessed the work, but the
+ * remarks are the school's feedback to its own student. Typed as an `Omit` rather
+ * than left on the shared shape so the UI cannot accidentally read a field that
+ * is never sent.
+ */
+export type SupervisorJournalRow = Omit<JournalListRow, "coordinatorRemarks">;
+export type SupervisorJournalDetail = Omit<
+  JournalEntryDetail,
+  "coordinatorRemarks"
+>;
+
+/**
+ * What the detail dialog renders: the supervisor-shaped entry, with the remarks
+ * optional so the student's and coordinator's fuller payloads fit too.
+ */
+export type JournalDetailView = SupervisorJournalDetail & {
+  coordinatorRemarks?: string | null;
+};
+
 export interface CoordinatorJournalQuery {
   scope?: "block" | "all";
   status?: JournalStatus | "";
@@ -260,7 +284,7 @@ export const journalApi = createApi({
 
     /* ----- supervisor (read-only) ----- */
     getSupervisorJournals: builder.query<
-      JournalListRow[],
+      SupervisorJournalRow[],
       SupervisorJournalQuery
     >({
       query: (params) => ({
@@ -272,7 +296,7 @@ export const journalApi = createApi({
         ),
       }),
     }),
-    getSupervisorJournalEntry: builder.query<JournalEntryDetail, string>({
+    getSupervisorJournalEntry: builder.query<SupervisorJournalDetail, string>({
       query: (id) => `/supervisor/journals/${id}`,
     }),
   }),

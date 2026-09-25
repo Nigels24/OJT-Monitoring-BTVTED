@@ -16,7 +16,7 @@ import {
   JOURNAL_STATUS_LABEL,
   JOURNAL_STATUS_VARIANT,
 } from "@/features/journal/components/journal-status";
-import type { JournalListRow } from "@/lib/api/journalApi";
+import type { SupervisorJournalRow } from "@/lib/api/journalApi";
 import { formatDateOnly, formatWeekdayOnly } from "@/lib/format";
 
 /**
@@ -27,7 +27,7 @@ export default function SupervisorJournalsPage() {
   const currentUser = useCurrentUser();
   const journals = useSupervisorJournals();
 
-  const columns: DataTableColumn<JournalListRow>[] = [
+  const columns: DataTableColumn<SupervisorJournalRow>[] = [
     {
       key: "student",
       label: "Trainee",

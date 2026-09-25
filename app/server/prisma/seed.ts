@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { PrismaClient } from '../generated/prisma/client';
 import * as bcrypt from 'bcrypt';
 import { generateTemporaryPassword } from '../src/common/temp-password';
+import { DOCUMENT_REQUIREMENT_SEED } from '../src/common/document-requirements';
 
 const prisma = new PrismaClient();
 
@@ -196,6 +197,31 @@ async function seedCourse(blockCoordinatorId: Record<string, string>) {
   );
 }
 
+/**
+ * The six required documents of thesis Table 3.
+ *
+ * The `document_requirements` migration inserts these too, so this is normally a
+ * no-op; it stays here so a database restored or branched without that
+ * migration's data still converges, and so the list has one authority in code
+ * (`src/common/document-requirements.ts`). Upserted on `code` with `update: {}`
+ * — an existing row is never overwritten, matching the rest of this seed's
+ * "never overwrites, never deletes" rule. That means renaming a requirement or
+ * retiring it (`isActive: false`) is a coordinator's change to keep, not
+ * something a re-seed undoes.
+ */
+async function seedDocumentRequirements() {
+  for (const requirement of DOCUMENT_REQUIREMENT_SEED) {
+    await prisma.documentRequirement.upsert({
+      where: { code: requirement.code },
+      create: requirement,
+      update: {},
+    });
+  }
+  console.log(
+    `Document requirements ready: ${DOCUMENT_REQUIREMENT_SEED.map((r) => r.code).join(', ')}.`,
+  );
+}
+
 async function main() {
   const coordinator1Id = await seedCoordinator({
     ...COORDINATOR,
@@ -210,6 +236,8 @@ async function main() {
     'Block A': coordinator1Id,
     'Block B': coordinator2Id,
   });
+
+  await seedDocumentRequirements();
 }
 
 main()
