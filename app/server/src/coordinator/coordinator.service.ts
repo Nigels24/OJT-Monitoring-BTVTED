@@ -14,7 +14,12 @@ import type {
   Weekday,
 } from '../../generated/prisma/client';
 import { totalHours } from '../common/attendance-hours';
-import { MS_PER_DAY, manilaToday, startOfUtcDay } from '../common/dates';
+import {
+  MS_PER_DAY,
+  manilaToday,
+  startOfUtcDay,
+  formatDateOnly,
+} from '../common/dates';
 import {
   computeProgress,
   progressFromRows,
@@ -38,6 +43,13 @@ import {
 import { deleteFile } from '../common/storage';
 import { SCHOOL_NAME } from '../common/school';
 import { generateTemporaryPassword } from '../common/temp-password';
+import { NotificationService } from '../notification/notification.service';
+import { OverdueSweepService } from '../notification/overdue-sweep.service';
+import {
+  daysPending,
+  overdueAttendanceWhere,
+  OVERDUE_DAYS,
+} from '../common/attendance-overdue';
 
 /** Fields the coordinator can set on a student, shared by create and update. */
 /**
@@ -72,7 +84,11 @@ interface StudentDetails {
 export class CoordinatorService {
   private readonly logger = new Logger(CoordinatorService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationService,
+    private overdueSweep: OverdueSweepService,
+  ) {}
 
   /** Rejects an email or username already claimed by another account. */
   private async assertCredentialsAvailable(email: string, username: string) {
@@ -560,6 +576,14 @@ export class CoordinatorService {
    * rather than reported as zero, so the UI can't imply a feature works.
    */
   async getDashboard() {
+    // Goal 4(ii): re-run the overdue sweep at the start of every dashboard
+    // load, not only on the six-hourly timer — see OverdueSweepService's own
+    // comment for why (a serverless/free-tier host can sleep between
+    // requests and never fire the interval at all). Errors are swallowed
+    // inside runSweep() itself, so this can never turn a sweep failure into a
+    // failed dashboard load.
+    await this.overdueSweep.runSweep();
+
     const weeksBack = 6;
     const trendStart = startOfWeek(weeksBack - 1);
     // Manila's calendar day, not the server's UTC day — they differ between
@@ -795,7 +819,7 @@ export class CoordinatorService {
     // so the rows are fetched flat and bucketed here — still one round trip per
     // table, no N+1, the same app-level aggregation shape as common/
     // attendance-hours.ts.
-    const [students, approvedRows] = await Promise.all([
+    const [students, approvedRows, pendingRows] = await Promise.all([
       this.prisma.client.student.findMany({
         include: {
           user: { select: { name: true } },
@@ -807,6 +831,14 @@ export class CoordinatorService {
         where: { status: 'APPROVED', date: { lt: todayEnd } },
         select: { studentId: true, date: true },
       }),
+      // Goal 4: every PENDING row's submission time, to derive the
+      // student's own worst-case overdue/daysPending below — a student can
+      // have several PENDING entries, so this is a per-student max, not a
+      // per-row value like the supervisor queue exposes.
+      this.prisma.client.attendance.findMany({
+        where: { status: 'PENDING' },
+        select: { studentId: true, submittedAt: true },
+      }),
     ]);
 
     const approvedByStudent = new Map<string, Date[]>();
@@ -814,6 +846,16 @@ export class CoordinatorService {
       const dates = approvedByStudent.get(row.studentId) ?? [];
       dates.push(row.date);
       approvedByStudent.set(row.studentId, dates);
+    }
+
+    // The single oldest PENDING submission per student — the one that would
+    // trip `isOverdue` first, and whose age is the worst-case daysPending.
+    const oldestPendingByStudent = new Map<string, Date>();
+    for (const row of pendingRows) {
+      const current = oldestPendingByStudent.get(row.studentId);
+      if (!current || row.submittedAt < current) {
+        oldestPendingByStudent.set(row.studentId, row.submittedAt);
+      }
     }
 
     return students.map((student) => {
@@ -837,6 +879,11 @@ export class CoordinatorService {
           )
         : 0;
 
+      const oldestPending = oldestPendingByStudent.get(student.id) ?? null;
+      const pendingDays = oldestPending
+        ? daysPending({ submittedAt: oldestPending })
+        : null;
+
       return {
         id: student.id,
         studentIdNumber: student.studentIdNumber,
@@ -849,8 +896,117 @@ export class CoordinatorService {
         // dashboard's averageRating makes between "no data" and a real zero.
         attendancePercentage:
           totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : null,
+        // Worst case across this student's own PENDING entries — a student
+        // row, not an attendance row, so "the" days pending is the oldest
+        // one still waiting.
+        overdue: pendingDays !== null && pendingDays >= OVERDUE_DAYS,
+        daysPending: pendingDays,
       };
     });
+  }
+
+  /**
+   * The dashboard's "Overdue verifications" table (goal 4): individual
+   * PENDING attendance rows past the 21-day window, scoped by the same My
+   * Block / All Program toggle `listStudents` uses (default block, fall back
+   * to all when the coordinator has none assigned). A separate endpoint from
+   * `getDashboard` rather than folded into it — that query is already a
+   * 12-way `Promise.allSettled` fan-out with no scope concept at all, and
+   * flipping this widget's own toggle should refetch only this, not the
+   * whole dashboard.
+   */
+  async getOverdueVerifications(
+    userId: string,
+    scope: 'block' | 'all' = 'block',
+  ) {
+    const coordinator = await this.getCoordinatorByUserId(userId);
+
+    let blockScopeIds: string[] | null = null;
+    let noBlocksAssigned = false;
+    if (scope !== 'all') {
+      const ownBlocks = await this.prisma.client.block.findMany({
+        where: { coordinatorId: coordinator.id },
+        select: { id: true },
+      });
+      if (ownBlocks.length > 0) {
+        blockScopeIds = ownBlocks.map((b) => b.id);
+      } else {
+        noBlocksAssigned = true;
+      }
+    }
+
+    const rows = await this.prisma.client.attendance.findMany({
+      where: {
+        ...overdueAttendanceWhere(),
+        ...(blockScopeIds
+          ? {
+              OR: [
+                {
+                  trainingAssignmentId: null,
+                  student: { blockId: { in: blockScopeIds } },
+                },
+                { trainingAssignment: { blockId: { in: blockScopeIds } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            user: { select: { name: true } },
+            establishment: { select: { id: true, name: true } },
+          },
+        },
+        trainingAssignment: {
+          select: { establishment: { select: { id: true, name: true } } },
+        },
+      },
+      orderBy: { submittedAt: 'asc' },
+    });
+
+    // Supervisor names, batched rather than one query per row — the same
+    // shape `batchAssignmentProgress` uses.
+    const establishmentIds = [
+      ...new Set(
+        rows
+          .map(
+            (r) =>
+              r.trainingAssignment?.establishment.id ??
+              r.student.establishment?.id,
+          )
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const supervisors = await this.prisma.client.supervisor.findMany({
+      where: { establishmentId: { in: establishmentIds } },
+      select: { establishmentId: true, user: { select: { name: true } } },
+    });
+    const supervisorNamesByEstablishment = new Map<string, string[]>();
+    for (const s of supervisors) {
+      const names = supervisorNamesByEstablishment.get(s.establishmentId) ?? [];
+      names.push(s.user.name);
+      supervisorNamesByEstablishment.set(s.establishmentId, names);
+    }
+
+    return {
+      noBlocksAssigned,
+      rows: rows.map((row) => {
+        const establishment =
+          row.trainingAssignment?.establishment ?? row.student.establishment;
+        return {
+          id: row.id,
+          studentName: row.student.user.name,
+          establishmentName: establishment?.name ?? null,
+          supervisorNames: establishment
+            ? (supervisorNamesByEstablishment.get(establishment.id) ?? [])
+            : [],
+          date: row.date,
+          daysPending: daysPending(row),
+          link: '/coordinator/attendance',
+        };
+      }),
+    };
   }
 
   /**
@@ -1352,6 +1508,43 @@ export class CoordinatorService {
           endDate: null,
         },
       });
+
+      // Goal 3: the student and every supervisor at the new establishment.
+      // Two calls, not one with both userIds — a student and a supervisor
+      // land on different role-gated routes, so `link` can't be shared.
+      // Committed in the same transaction as the placement itself — a
+      // notification for a placement that then rolled back would be
+      // meaningless.
+      const establishmentSupervisors = await tx.supervisor.findMany({
+        where: { establishmentId: data.establishmentId },
+        select: { userId: true },
+      });
+      // Each placement is its own new TrainingAssignment row, so the id
+      // alone is already a fresh "version" — no submittedAt-style marker
+      // needed the way attendance's dedupeKey has one.
+      const dedupeKey = `placement:${created.id}`;
+      await this.notifications.notify(tx, {
+        userIds: [student.userId],
+        type: 'PLACEMENT_RECORDED',
+        title: 'New OJT placement recorded',
+        body: `A placement was recorded for ${data.academicYear}, starting ${formatDateOnly(startDate)}.`,
+        link: '/student/dashboard',
+        entityType: 'TrainingAssignment',
+        entityId: created.id,
+        dedupeKey,
+      });
+      if (establishmentSupervisors.length > 0) {
+        await this.notifications.notify(tx, {
+          userIds: establishmentSupervisors.map((s) => s.userId),
+          type: 'PLACEMENT_RECORDED',
+          title: 'New trainee placed at your establishment',
+          body: `A student was placed at your establishment for ${data.academicYear}, starting ${formatDateOnly(startDate)}.`,
+          link: '/supervisor/dashboard',
+          entityType: 'TrainingAssignment',
+          entityId: created.id,
+          dedupeKey,
+        });
+      }
 
       return { created, progress: await computeProgress(tx, created.id) };
     });

@@ -399,6 +399,24 @@ export class CoordinatorController {
     return this.coordinatorService.getDashboard();
   }
 
+  /**
+   * The dashboard's "Overdue verifications" widget, scoped by the same
+   * My Block / All Program toggle as `GET /coordinator/students` — a
+   * separate request from `GET /coordinator/dashboard` so flipping this
+   * toggle doesn't refetch the whole dashboard. See
+   * `CoordinatorService.getOverdueVerifications`.
+   */
+  @Get('dashboard/overdue')
+  getOverdueVerifications(
+    @Req() req: AuthedRequest,
+    @Query('scope') scope?: 'block' | 'all',
+  ) {
+    return this.coordinatorService.getOverdueVerifications(
+      req.user.userId,
+      scope === 'all' ? 'all' : 'block',
+    );
+  }
+
   @Get('attendance')
   getAttendanceOversight() {
     return this.coordinatorService.getAttendanceOversight();

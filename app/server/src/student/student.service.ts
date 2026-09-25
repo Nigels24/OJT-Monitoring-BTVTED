@@ -347,6 +347,13 @@ export class StudentService {
             // it may not be the one it was originally logged against if the
             // student was reassigned in between.
             trainingAssignmentId: activeAssignment.id,
+            // This *is* the (re)submission — reset the 21-day overdue clock
+            // (common/attendance-overdue.ts) so a corrected entry starts its
+            // wait over rather than inheriting however old the original row
+            // already was. `createdAt` stays untouched (Prisma only writes
+            // fields present here), which is deliberate — see submittedAt's
+            // schema comment.
+            submittedAt: new Date(),
           },
         })
       : await this.prisma.client.attendance.create({

@@ -53,6 +53,18 @@ enum AssignmentStatus {
   CANCELLED
 }
 
+enum NotificationType {
+  ATTENDANCE_APPROVED
+  ATTENDANCE_DECLINED
+  ATTENDANCE_OVERDUE
+  JOURNAL_RETURNED
+  JOURNAL_ACCEPTED
+  DOCUMENT_REVIEWED
+  ASSESSMENT_COMPLETED
+  CONCERN_RAISED
+  PLACEMENT_RECORDED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -78,6 +90,7 @@ model User {
 
   conversations ConversationParticipant[]
   messagesSent  Message[]
+  notifications Notification[]
 }
 
 model Establishment {
@@ -316,6 +329,16 @@ model Attendance {
 
   createdAt DateTime @default(now())
 
+  // Distinct from `createdAt`: a DECLINED row corrected and resubmitted is
+  // updated in place (see StudentService.submitAttendance), which leaves
+  // `createdAt` at the *original* insert time. The 21-day overdue window has
+  // to measure from the most recent time this row *became* PENDING, or a
+  // corrected resubmission would read as already overdue from the moment it
+  // was saved. `createdAt` is right for "when was this row first written";
+  // `submittedAt` is right for "how long has this specific PENDING state been
+  // waiting on a supervisor" — see common/attendance-overdue.ts.
+  submittedAt DateTime @default(now())
+
   // One log per student per day. Without this a student can submit the same
   // day repeatedly and every hours total counts it more than once.
   // `date` is normalised to UTC midnight on write (see StudentService), which
@@ -513,4 +536,59 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   content        String
   createdAt      DateTime     @default(now())
+}
+
+/// In-app notifications only (thesis Obj 9) — no email infrastructure exists,
+/// same reasoning as the rest of the app's account-recovery story.
+///
+/// `onDelete: Cascade` here is a deliberate, narrow exception to CLAUDE.md §6
+/// ("no onDelete: Cascade anywhere, deletion is spelled out explicitly in
+/// cascade-delete.ts"). That rule exists because a person-delete has business
+/// consequences worth spelling out (export files first, null an approver
+/// rather than losing history, etc.). A notification has none of that — it is
+/// disposable, derived, read-only-to-the-user data, so letting Postgres drop
+/// it alongside its owner is strictly simpler and cannot lose anything that
+/// matters. `deleteStudentCascade`/`deleteSupervisorCascade` do not need to
+/// touch this table because of it.
+///
+/// `@@unique([userId, dedupeKey])` is what makes `notify()`'s
+/// `createMany({ skipDuplicates: true })` idempotent for a re-run of the same
+/// *event* (re-triggering the overdue sweep, a double-clicked action) without
+/// swallowing a genuinely new one for the same record (a second decline after
+/// a resubmission, a re-alert once a corrected entry goes overdue again).
+/// `dedupeKey` — not `[type, entityId]` — is what encodes that distinction:
+/// see `NotificationService.notify`'s own comment for the convention. NULL
+/// when a call site sets none, and Postgres treats NULLs as distinct from
+/// each other, so an un-deduped notification type is simply never coalesced.
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+  title  String
+  body   String
+  // Client-side route the notification navigates to on click, e.g.
+  // "/student/attendance". Absolute app path, not a full URL — this system has
+  // one client origin.
+  link String?
+
+  // What this notification is about — plain reference fields, read by the
+  // client/future call sites, but no longer part of the dedupe key
+  // themselves (see `dedupeKey`). Both optional: some notification types
+  // (none yet) may have no single backing record.
+  entityType String?
+  entityId   String?
+
+  // Idempotency key, distinct from entityType/entityId: encodes not just
+  // *which* record but *which version/cycle* of it this notification is
+  // about, so re-running the same trigger is a no-op while a new cycle for
+  // the same record still gets through. Optional — a call site that never
+  // needs deduping (none yet) simply omits it.
+  dedupeKey String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
 }

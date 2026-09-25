@@ -21,6 +21,9 @@ import {
 } from '../common/evaluation-scoring';
 import { CASCADE_TRANSACTION_OPTIONS } from '../common/cascade-delete';
 import { EvaluationTemplateService } from '../evaluation-template/evaluation-template.service';
+import { NotificationService } from '../notification/notification.service';
+import { formatDateOnly } from '../common/dates';
+import { isOverdue, daysPending } from '../common/attendance-overdue';
 
 type AttendanceStatus = 'PENDING' | 'APPROVED' | 'DECLINED';
 
@@ -31,6 +34,7 @@ export class SupervisorService {
   constructor(
     private prisma: PrismaService,
     private templates: EvaluationTemplateService,
+    private notifications: NotificationService,
   ) {}
 
   private async getSupervisorByUserId(userId: string) {
@@ -220,6 +224,10 @@ export class SupervisorService {
     return records.map((record) => ({
       ...record,
       hours: Math.round(hoursForAttendance(record) * 100) / 100,
+      // Goal 4: exposed on every row so the supervisor's queue can flag one
+      // that has been sitting unactioned past the 21-day window.
+      overdue: isOverdue(record),
+      daysPending: record.status === 'PENDING' ? daysPending(record) : null,
     }));
   }
 
@@ -338,12 +346,12 @@ export class SupervisorService {
 
   async approveAttendance(userId: string, attendanceId: string) {
     const supervisor = await this.getSupervisorByUserId(userId);
-    await this.verifyAttendanceBelongsToSupervisor(
+    const attendance = await this.verifyAttendanceBelongsToSupervisor(
       attendanceId,
       supervisor.establishmentId,
     );
 
-    return this.prisma.client.attendance.update({
+    const updated = await this.prisma.client.attendance.update({
       where: { id: attendanceId },
       data: {
         status: 'APPROVED',
@@ -353,6 +361,23 @@ export class SupervisorService {
         declineReason: null,
       },
     });
+
+    await this.notifications.notify(this.prisma.client, {
+      userIds: [attendance.student.userId],
+      type: 'ATTENDANCE_APPROVED',
+      title: 'Attendance approved',
+      body: `Your attendance for ${formatDateOnly(updated.date)} was approved.`,
+      link: '/student/attendance',
+      entityType: 'Attendance',
+      entityId: attendanceId,
+      // Keyed on submittedAt, not just the row id: a double-click on Approve
+      // is a no-op (same key), but if this entry is later declined,
+      // corrected, and approved again, that's a new submission cycle with
+      // its own submittedAt and gets its own notification.
+      dedupeKey: `ATTENDANCE_APPROVED:${attendanceId}:${updated.submittedAt.toISOString()}`,
+    });
+
+    return updated;
   }
 
   async declineAttendance(
@@ -361,12 +386,12 @@ export class SupervisorService {
     reason: string,
   ) {
     const supervisor = await this.getSupervisorByUserId(userId);
-    await this.verifyAttendanceBelongsToSupervisor(
+    const attendance = await this.verifyAttendanceBelongsToSupervisor(
       attendanceId,
       supervisor.establishmentId,
     );
 
-    return this.prisma.client.attendance.update({
+    const updated = await this.prisma.client.attendance.update({
       where: { id: attendanceId },
       data: {
         status: 'DECLINED',
@@ -374,8 +399,25 @@ export class SupervisorService {
         declineReason: reason,
       },
     });
+
+    await this.notifications.notify(this.prisma.client, {
+      userIds: [attendance.student.userId],
+      type: 'ATTENDANCE_DECLINED',
+      title: 'Attendance declined',
+      body: `Your attendance for ${formatDateOnly(updated.date)} was declined: ${reason}`,
+      link: '/student/attendance',
+      entityType: 'Attendance',
+      entityId: attendanceId,
+      // Same reasoning as ATTENDANCE_APPROVED's dedupeKey: a double-click is
+      // a no-op, but declining this entry again after the student corrects
+      // and resubmits it (a new submittedAt) is a new event.
+      dedupeKey: `ATTENDANCE_DECLINED:${attendanceId}:${updated.submittedAt.toISOString()}`,
+    });
+
+    return updated;
   }
 
+  /** Returns the fetched row so approve/decline can notify without a second query. */
   private async verifyAttendanceBelongsToSupervisor(
     attendanceId: string,
     establishmentId: string,
@@ -383,7 +425,7 @@ export class SupervisorService {
     const attendance = await this.prisma.client.attendance.findUnique({
       where: { id: attendanceId },
       include: {
-        student: { select: { establishmentId: true } },
+        student: { select: { userId: true, establishmentId: true } },
         trainingAssignment: { select: { establishmentId: true } },
       },
     });
@@ -395,6 +437,7 @@ export class SupervisorService {
         'This attendance record belongs to a different establishment',
       );
     }
+    return attendance;
   }
 
   /**

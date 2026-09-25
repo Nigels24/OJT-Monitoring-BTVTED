@@ -34,6 +34,33 @@ export function formatWeekdayOnly(
   });
 }
 
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", 365 * 24 * 60 * 60],
+  ["month", 30 * 24 * 60 * 60],
+  ["week", 7 * 24 * 60 * 60],
+  ["day", 24 * 60 * 60],
+  ["hour", 60 * 60],
+  ["minute", 60],
+];
+
+/**
+ * "3 hours ago", "2 days ago" — for a real instant like `Notification.createdAt`,
+ * never a date-only column (use `formatDateOnly` for those instead).
+ */
+export function formatRelativeTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+  for (const [unit, secondsInUnit] of RELATIVE_UNITS) {
+    if (Math.abs(seconds) >= secondsInUnit) {
+      return rtf.format(Math.round(seconds / secondsInUnit), unit);
+    }
+  }
+  return rtf.format(seconds, "second");
+}
+
 /**
  * `1 document`, `2 documents` — a count with its noun, pluralised.
  *

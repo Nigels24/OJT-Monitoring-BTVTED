@@ -28,8 +28,10 @@ export default function CoordinatorAttendancePage() {
     paged,
     totalPages,
     stats,
+    overdueOnly,
     setSearch,
     setPage,
+    setOverdueOnly,
   } = useAttendanceOversight();
 
   return (
@@ -50,7 +52,7 @@ export default function CoordinatorAttendancePage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
           {/*
             On a failed request these read "—" rather than 0: the figures are
             unknown, and a row of real-looking zeroes beside the table's error
@@ -79,6 +81,12 @@ export default function CoordinatorAttendancePage() {
             icon={AlertTriangle}
             subtext="Below 80% attendance"
           />
+          <StatCard
+            label="Overdue Verifications"
+            value={isError ? "—" : stats.overdue}
+            icon={AlertTriangle}
+            subtext="Pending 21+ days"
+          />
         </div>
 
         <Card>
@@ -89,8 +97,10 @@ export default function CoordinatorAttendancePage() {
             search={search}
             page={page}
             totalPages={totalPages}
+            overdueOnly={overdueOnly}
             onSearchChange={setSearch}
             onPageChange={setPage}
+            onOverdueOnlyChange={setOverdueOnly}
           />
         </Card>
       </main>

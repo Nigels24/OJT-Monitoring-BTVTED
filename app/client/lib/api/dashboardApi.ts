@@ -40,6 +40,26 @@ export interface RecentStudent {
   status: string;
 }
 
+export interface OverdueVerificationRow {
+  id: string;
+  studentName: string;
+  establishmentName: string | null;
+  /** Every supervisor at that establishment — a PENDING row has no single approver yet. */
+  supervisorNames: string[];
+  /** The attendance date (UTC-midnight date-only), not when it was submitted. */
+  date: string;
+  daysPending: number;
+  link: string;
+}
+
+export interface OverdueVerifications {
+  /** True when `scope=block` fell back to the full program because this
+   * coordinator has no blocks assigned yet — same meaning as
+   * ListStudentsResponse.noBlocksAssigned. */
+  noBlocksAssigned: boolean;
+  rows: OverdueVerificationRow[];
+}
+
 export interface CoordinatorDashboard {
   /**
    * Sections whose queries failed. The endpoint returns empty defaults for
@@ -81,13 +101,29 @@ export interface CoordinatorDashboard {
 export const dashboardApi = createApi({
   reducerPath: "dashboardApi",
   baseQuery: baseQueryWithAuth,
-  tagTypes: ["Dashboard"],
+  tagTypes: ["Dashboard", "OverdueVerifications"],
   endpoints: (builder) => ({
     getCoordinatorDashboard: builder.query<CoordinatorDashboard, void>({
       query: () => "/coordinator/dashboard",
       providesTags: ["Dashboard"],
     }),
+    /**
+     * A separate request from the dashboard above (own scope toggle, own
+     * cache tag) — see coordinator.controller.ts's own comment for why this
+     * isn't folded into the mega-dashboard query.
+     */
+    getOverdueVerifications: builder.query<
+      OverdueVerifications,
+      "block" | "all" | void
+    >({
+      query: (scope) =>
+        `/coordinator/dashboard/overdue${scope ? `?scope=${scope}` : ""}`,
+      providesTags: ["OverdueVerifications"],
+    }),
   }),
 });
 
-export const { useGetCoordinatorDashboardQuery } = dashboardApi;
+export const {
+  useGetCoordinatorDashboardQuery,
+  useGetOverdueVerificationsQuery,
+} = dashboardApi;

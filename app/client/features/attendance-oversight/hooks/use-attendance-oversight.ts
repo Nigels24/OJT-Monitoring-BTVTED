@@ -14,20 +14,23 @@ const AT_RISK_THRESHOLD = 80;
 export function useAttendanceOversight() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const { data: rows, isLoading, isError } = useGetAttendanceOversightQuery();
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return rows ?? [];
-    return (rows ?? []).filter((r) =>
-      [r.name, r.studentIdNumber, r.establishmentName]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(term),
-    );
-  }, [rows, search]);
+    return (rows ?? [])
+      .filter((r) => !overdueOnly || r.overdue)
+      .filter((r) => {
+        if (!term) return true;
+        return [r.name, r.studentIdNumber, r.establishmentName]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      });
+  }, [rows, search, overdueOnly]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -50,6 +53,7 @@ export function useAttendanceOversight() {
               measured.reduce((sum, p) => sum + p, 0) / measured.length,
             ),
       atRisk: measured.filter((p) => p < AT_RISK_THRESHOLD).length,
+      overdue: all.filter((r) => r.overdue).length,
     };
   }, [rows]);
 
@@ -62,6 +66,8 @@ export function useAttendanceOversight() {
     paged,
     totalPages,
     filtered,
+    overdueOnly,
+    setOverdueOnly,
     stats,
 
     setSearch,

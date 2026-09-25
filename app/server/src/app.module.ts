@@ -14,6 +14,7 @@ import { SupervisorModule } from './supervisor/supervisor.module';
 import { MessagesModule } from './messages/messages.module';
 import { EvaluationTemplateModule } from './evaluation-template/evaluation-template.module';
 import { CourseModule } from './course/course.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CourseModule } from './course/course.module';
     MessagesModule,
     EvaluationTemplateModule,
     CourseModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

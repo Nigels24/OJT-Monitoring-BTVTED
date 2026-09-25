@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import Sidebar from "@/components/layout/Sidebar";
 import { COORDINATOR_NAV } from "@/features/coordinator/nav";
@@ -24,10 +25,14 @@ import {
   Hourglass,
   TrendingUp,
   PieChart,
+  AlertTriangle,
+  Globe,
 } from "lucide-react";
 import {
   useGetCoordinatorDashboardQuery,
+  useGetOverdueVerificationsQuery,
   RecentStudent,
+  OverdueVerificationRow,
 } from "@/lib/api/dashboardApi";
 import { formatDateOnly } from "@/lib/format";
 import SectionError from "@/components/ui/SectionError";
@@ -104,11 +109,59 @@ const STUDENT_COLUMNS: DataTableColumn<RecentStudent>[] = [
   },
 ];
 
+const OVERDUE_COLUMNS: DataTableColumn<OverdueVerificationRow>[] = [
+  {
+    key: "studentName",
+    label: "Student",
+    render: (r) => <span className="font-medium text-gray-900">{r.studentName}</span>,
+  },
+  {
+    key: "establishmentName",
+    label: "Establishment",
+    render: (r) => r.establishmentName ?? "—",
+  },
+  {
+    key: "supervisorNames",
+    label: "Supervisor",
+    render: (r) => (r.supervisorNames.length > 0 ? r.supervisorNames.join(", ") : "—"),
+  },
+  {
+    key: "date",
+    label: "Date",
+    render: (r) => formatDateOnly(r.date),
+  },
+  {
+    key: "daysPending",
+    label: "Days Pending",
+    render: (r) => (
+      <StatusBadge label={`${r.daysPending}d`} variant="declined" />
+    ),
+  },
+  {
+    key: "link",
+    label: "",
+    render: (r) => (
+      <Link href={r.link} className="text-sm font-medium text-blue-600 hover:underline">
+        Review
+      </Link>
+    ),
+  },
+];
+
 export default function CoordinatorDashboard() {
   const currentUser = useCurrentUser();
   const userName = currentUser?.name || "Admin";
   const { data, isLoading, error, refetch, isFetching } =
     useGetCoordinatorDashboardQuery();
+
+  // Own scope toggle, independent of the rest of the dashboard (goal 4) — see
+  // dashboardApi's own comment on why this is a separate query entirely.
+  const [overdueScope, setOverdueScope] = useState<"block" | "all">("block");
+  const {
+    data: overdueData,
+    isLoading: overdueLoading,
+    isError: overdueError,
+  } = useGetOverdueVerificationsQuery(overdueScope);
 
   /**
    * Sections the endpoint reported as failed. It returns empty defaults for
@@ -283,6 +336,77 @@ export default function CoordinatorDashboard() {
                 </Card>
               )}
             </div>
+
+            <Card className="mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base md:text-lg font-semibold text-gray-800 flex items-center gap-2">
+                    <AlertTriangle size={18} className="text-red-600" />
+                    Overdue Verifications
+                  </h2>
+                  {!overdueError && overdueData && (
+                    <StatusBadge
+                      label={`${overdueData.rows.length}`}
+                      variant="declined"
+                    />
+                  )}
+                </div>
+                {/* My Block / All Program — same toggle as the student roster
+                    (Step 3), scoped to just this widget. */}
+                <div className="inline-flex rounded-lg border border-gray-300 bg-white p-1 self-start">
+                  <button
+                    type="button"
+                    onClick={() => setOverdueScope("block")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      overdueScope === "block"
+                        ? "bg-blue-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    <Users size={14} />
+                    My Block
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOverdueScope("all")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                      overdueScope === "all"
+                        ? "bg-blue-600 text-white"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    <Globe size={14} />
+                    All Program
+                  </button>
+                </div>
+              </div>
+              {overdueData?.noBlocksAssigned && overdueScope === "block" && (
+                <p className="text-xs text-amber-600 mb-3">
+                  You have no blocks assigned yet, so this is showing every
+                  overdue entry in the program.
+                </p>
+              )}
+              {overdueLoading ? (
+                <p className="text-gray-400 text-sm">Loading...</p>
+              ) : overdueError ? (
+                <p className="text-red-600 text-sm py-8 text-center">
+                  Couldn&apos;t load overdue verifications. Please refresh to
+                  try again.
+                </p>
+              ) : (overdueData?.rows.length ?? 0) === 0 ? (
+                <p className="text-gray-500 text-sm py-8 text-center">
+                  Nothing has been pending for more than 21 days.
+                </p>
+              ) : (
+                <DataTable
+                  title=""
+                  icon={AlertTriangle}
+                  columns={OVERDUE_COLUMNS}
+                  data={overdueData!.rows}
+                  keyField="id"
+                />
+              )}
+            </Card>
 
             <Card>
               <div className="flex items-center justify-between mb-4">

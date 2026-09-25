@@ -8,6 +8,7 @@ import ChangePasswordDialog from "@/features/account/ChangePasswordDialog";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { Z_LAYERS } from "@/components/ui/Overlay";
 import { useUnreadCount } from "@/features/messaging/hooks/use-unread-count";
+import NotificationBell from "@/features/notifications/components/NotificationBell";
 import {
   LucideIcon,
   Building2,
@@ -64,16 +65,21 @@ export default function Sidebar({
       className="w-64 sticky top-0 h-screen shrink-0 overflow-y-auto flex flex-col bg-gradient-to-b from-indigo-500 to-purple-700 text-white"
     >
       <div className="p-5 border-b border-white/10">
-        <div className="flex items-center gap-2 font-bold text-lg">
-          <Building2 size={22} />
-          {orgName}
-        </div>
-        {orgSubtitle && (
-          <div className="flex items-center gap-1.5 text-sm text-white/80 mt-1">
-            <MapPin size={14} />
-            {orgSubtitle}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 font-bold text-lg">
+              <Building2 size={22} className="shrink-0" />
+              <span className="truncate">{orgName}</span>
+            </div>
+            {orgSubtitle && (
+              <div className="flex items-center gap-1.5 text-sm text-white/80 mt-1">
+                <MapPin size={14} className="shrink-0" />
+                <span className="truncate">{orgSubtitle}</span>
+              </div>
+            )}
           </div>
-        )}
+          <NotificationBell />
+        </div>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">

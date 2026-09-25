@@ -1,6 +1,7 @@
-import { Search, ChevronLeft, ChevronRight, CalendarCheck } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, CalendarCheck, AlertTriangle } from "lucide-react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import ProgressBar from "@/components/ui/ProgressBar";
+import StatusBadge from "@/components/ui/StatusBadge";
 import { AttendanceOversightRow } from "@/lib/api/attendanceOversightApi";
 
 interface AttendanceOversightTableProps {
@@ -10,8 +11,10 @@ interface AttendanceOversightTableProps {
   search: string;
   page: number;
   totalPages: number;
+  overdueOnly: boolean;
   onSearchChange: (value: string) => void;
   onPageChange: (page: number) => void;
+  onOverdueOnlyChange: (value: boolean) => void;
   emptyMessage?: string;
 }
 
@@ -22,8 +25,10 @@ export default function AttendanceOversightTable({
   search,
   page,
   totalPages,
+  overdueOnly,
   onSearchChange,
   onPageChange,
+  onOverdueOnlyChange,
   emptyMessage = "No students match your filters.",
 }: AttendanceOversightTableProps) {
   const columns: DataTableColumn<AttendanceOversightRow>[] = [
@@ -66,24 +71,51 @@ export default function AttendanceOversightTable({
           </div>
         ),
     },
+    {
+      key: "overdue",
+      label: "Verification",
+      render: (r) =>
+        r.overdue ? (
+          <StatusBadge label={`Overdue ${r.daysPending}d`} variant="declined" />
+        ) : (
+          <span className="text-gray-300">—</span>
+        ),
+    },
   ];
 
   return (
     <div>
-      <div className="relative mb-4">
-        <Search
-          size={16}
-          className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-gray-400"
-        />
-        <input
-          value={search}
-          onChange={(e) => {
-            onSearchChange(e.target.value);
+      <div className="flex flex-col md:flex-row gap-3 mb-4">
+        <div className="relative flex-1">
+          <Search
+            size={16}
+            className="absolute left-3 md:left-4 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            value={search}
+            onChange={(e) => {
+              onSearchChange(e.target.value);
+              onPageChange(1);
+            }}
+            placeholder="Search by student, ID or establishment..."
+            className="w-full h-10 md:h-12 pl-9 md:pl-11 pr-3 md:pr-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            onOverdueOnlyChange(!overdueOnly);
             onPageChange(1);
           }}
-          placeholder="Search by student, ID or establishment..."
-          className="w-full h-10 md:h-12 pl-9 md:pl-11 pr-3 md:pr-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm text-gray-900 placeholder-gray-400"
-        />
+          className={`h-10 md:h-12 px-4 rounded-lg border text-sm font-medium inline-flex items-center gap-2 whitespace-nowrap transition-colors ${
+            overdueOnly
+              ? "bg-red-600 border-red-600 text-white"
+              : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50"
+          }`}
+        >
+          <AlertTriangle size={16} />
+          Overdue only
+        </button>
       </div>
 
       {isLoading ? (

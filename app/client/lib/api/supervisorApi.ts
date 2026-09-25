@@ -16,6 +16,10 @@ export interface SupervisorAttendance {
   status: AttendanceStatus;
   createdAt: string;
   hours: number;
+  /** PENDING and submitted more than 21 days ago (common/attendance-overdue.ts). */
+  overdue: boolean;
+  /** null unless PENDING — an approved/declined row has nothing "pending" about it. */
+  daysPending: number | null;
   student: {
     id: string;
     studentIdNumber: string;

@@ -137,10 +137,15 @@ export default function ApprovalTable({
       key: "status",
       label: "Status",
       render: (r) => (
-        <StatusBadge
-          label={STATUS_LABEL[r.status]}
-          variant={STATUS_VARIANT[r.status]}
-        />
+        <div className="flex flex-col gap-1 items-start">
+          <StatusBadge
+            label={STATUS_LABEL[r.status]}
+            variant={STATUS_VARIANT[r.status]}
+          />
+          {r.overdue && (
+            <StatusBadge label={`Overdue ${r.daysPending}d`} variant="declined" />
+          )}
+        </div>
       ),
     },
     {

@@ -21,6 +21,14 @@ export interface AttendanceOversightRow {
    * date, or it is still in the future. Render it as "—", never as 0%.
    */
   attendancePercentage: number | null;
+  /**
+   * Worst case across this student's own PENDING entries — true once their
+   * oldest unactioned one has been waiting more than 21 days
+   * (common/attendance-overdue.ts, server-side).
+   */
+  overdue: boolean;
+  /** The oldest PENDING entry's age in days; null when the student has none. */
+  daysPending: number | null;
 }
 
 export const attendanceOversightApi = createApi({

@@ -3,9 +3,10 @@ import { SupervisorService } from './supervisor.service';
 import { SupervisorController } from './supervisor.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EvaluationTemplateModule } from '../evaluation-template/evaluation-template.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
-  imports: [PrismaModule, EvaluationTemplateModule],
+  imports: [PrismaModule, EvaluationTemplateModule, NotificationModule],
   controllers: [SupervisorController],
   providers: [SupervisorService],
 })
