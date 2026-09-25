@@ -27,6 +27,7 @@ import {
   PieChart,
   AlertTriangle,
   Globe,
+  NotebookPen,
 } from "lucide-react";
 import {
   useGetCoordinatorDashboardQuery,
@@ -34,6 +35,7 @@ import {
   RecentStudent,
   OverdueVerificationRow,
 } from "@/lib/api/dashboardApi";
+import { useGetJournalsAwaitingCountQuery } from "@/lib/api/journalApi";
 import { formatDateOnly } from "@/lib/format";
 import SectionError from "@/components/ui/SectionError";
 
@@ -163,6 +165,12 @@ export default function CoordinatorDashboard() {
     isError: overdueError,
   } = useGetOverdueVerificationsQuery(overdueScope);
 
+  // Journals awaiting review, reusing the same scope toggle rather than adding a
+  // second one — its own request, so flipping the toggle never refetches the
+  // whole dashboard.
+  const { data: journalsAwaiting, isError: journalsError } =
+    useGetJournalsAwaitingCountQuery(overdueScope);
+
   /**
    * Sections the endpoint reported as failed. It returns empty defaults for
    * these rather than a 500, so everything that loaded still renders and only
@@ -272,6 +280,19 @@ export default function CoordinatorDashboard() {
                 value={data.stats.totalEvaluations}
                 icon={Star}
                 subtext="submitted"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+              <StatCard
+                label="Journals Awaiting Review"
+                value={journalsError ? "—" : (journalsAwaiting?.count ?? "—")}
+                icon={NotebookPen}
+                subtext={
+                  overdueScope === "block" && !journalsAwaiting?.noBlocksAssigned
+                    ? "in your blocks"
+                    : "program-wide"
+                }
               />
             </div>
 

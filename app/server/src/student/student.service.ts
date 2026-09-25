@@ -16,9 +16,10 @@ import {
 } from '../common/dates';
 import {
   computeProgress,
-  WEEKDAY_BY_JS_DAY,
   ZERO_ASSIGNMENT_PROGRESS,
 } from '../common/assignment-progress';
+import { assertDutyDay } from '../common/duty-days';
+import { assertValidDocumentUpload } from '../common/file-upload';
 import {
   buildObjectPath,
   deleteFile,
@@ -80,13 +81,6 @@ export const DOCUMENT_INCLUDE = {
     select: { id: true, user: { select: { name: true } } },
   },
 } as const;
-
-export const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf',
-  'image/png',
-  'image/jpeg',
-]);
-export const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
 @Injectable()
 export class StudentService {
@@ -266,19 +260,9 @@ export class StudentService {
       );
     }
 
-    // Non-duty days are excluded from attendance (thesis rule): a Wed-Fri
-    // assignment is never "absent" on Mon/Tue, so those days are not
-    // loggable at all, not merely unpenalised.
-    const submittedWeekday = WEEKDAY_BY_JS_DAY[date.getUTCDay()];
-    if (!activeAssignment.dutyDays.includes(submittedWeekday)) {
-      const scheduled = [...activeAssignment.dutyDays]
-        .sort((a, b) => WEEK_ORDER.indexOf(a) - WEEK_ORDER.indexOf(b))
-        .map((day) => WEEKDAY_LABELS[day])
-        .join(', ');
-      throw new BadRequestException(
-        `${WEEKDAY_LABELS[submittedWeekday]} is not one of your scheduled duty days (${scheduled}).`,
-      );
-    }
+    // Non-duty days are excluded from attendance (thesis rule) — the check and
+    // its wording are shared with journal entries, see common/duty-days.ts.
+    assertDutyDay(date, activeAssignment.dutyDays);
 
     const times = {
       timeInAM: parseTime(data.timeInAM),
@@ -407,7 +391,7 @@ export class StudentService {
     file: Express.Multer.File | undefined,
   ) {
     const student = await this.getStudentByUserId(userId);
-    assertValidDocumentFile(file);
+    assertValidDocumentUpload(file);
 
     // Nullable, and deliberately not required: the thesis has students
     // uploading an application letter/resume BEFORE they are placed anywhere,
@@ -482,7 +466,7 @@ export class StudentService {
     file: Express.Multer.File | undefined,
   ) {
     const student = await this.getStudentByUserId(userId);
-    assertValidDocumentFile(file);
+    assertValidDocumentUpload(file);
 
     const path = buildObjectPath('credentials', student.id, file.originalname);
     await uploadFile(path, file.buffer, file.mimetype);
@@ -564,33 +548,6 @@ export async function withSignedUrl<T extends { fileUrl: string }>(
 
 /** Module-scope: `withSignedUrl` is a free function, not part of the service. */
 const storageLogger = new Logger('StorageSignedUrl');
-
-/** Canonical Mon-first week order, for sorting `dutyDays` into a readable message. */
-const WEEK_ORDER = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
-
-const WEEKDAY_LABELS: Record<string, string> = {
-  MON: 'Mon',
-  TUE: 'Tue',
-  WED: 'Wed',
-  THU: 'Thu',
-  FRI: 'Fri',
-  SAT: 'Sat',
-  SUN: 'Sun',
-};
-
-function assertValidDocumentFile(
-  file: Express.Multer.File | undefined,
-): asserts file is Express.Multer.File {
-  if (!file) {
-    throw new BadRequestException('A file is required');
-  }
-  if (!ALLOWED_DOCUMENT_MIME_TYPES.has(file.mimetype)) {
-    throw new BadRequestException('Only PDF, PNG or JPEG files are accepted');
-  }
-  if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
-    throw new BadRequestException('File must be 10MB or smaller');
-  }
-}
 
 /** Adds the derived hours so the client never recomputes them. */
 function withHours<T extends Parameters<typeof hoursForAttendance>[0]>(

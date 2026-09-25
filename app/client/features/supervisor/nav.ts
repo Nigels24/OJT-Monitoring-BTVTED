@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   CalendarCheck,
+  NotebookText,
   Star,
   MessageSquare,
 } from "lucide-react";
@@ -13,6 +14,8 @@ export const SUPERVISOR_NAV = [
     href: "/supervisor/attendance",
     icon: CalendarCheck,
   },
+  // Read-only: the coordinator reviews journals, the supervisor just reads them.
+  { label: "Journals", href: "/supervisor/journals", icon: NotebookText },
   { label: "Evaluation", href: "/supervisor/evaluation", icon: Star },
   { label: "Messages", href: "/supervisor/messages", icon: MessageSquare },
 ];

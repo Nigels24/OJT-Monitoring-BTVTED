@@ -77,6 +77,13 @@ export async function deleteStudentCascade(
     where: { studentId },
     select: { fileUrl: true },
   });
+  // Journal photos are collected the same way, before their rows go: the
+  // objects themselves live in the same private bucket and are removed by the
+  // caller after the commit, since storage is not transactional.
+  const journalPhotos = await tx.journalPhoto.findMany({
+    where: { journalEntry: { studentId } },
+    select: { storagePath: true },
+  });
 
   await tx.attendance.deleteMany({ where: { studentId } });
   await tx.document.deleteMany({ where: { studentId } });
@@ -87,6 +94,12 @@ export async function deleteStudentCascade(
     where: { evaluation: { studentId } },
   });
   await tx.evaluation.deleteMany({ where: { studentId } });
+  // Before the assignments below: JournalEntry has a hard FK to
+  // TrainingAssignment, so a leftover entry aborts that delete. Its photos go
+  // with it via the one `onDelete: Cascade` on JournalPhoto (see the schema's
+  // comment on why that exception is safe) — no separate deleteMany needed,
+  // but their storage paths were captured above.
+  await tx.journalEntry.deleteMany({ where: { studentId } });
   // TrainingAssignment.studentId is onDelete: Restrict, so this must run
   // before tx.student.delete below or that delete aborts on a leftover row.
   // Deleting the student is an explicit full removal — their assignments
@@ -101,7 +114,11 @@ export async function deleteStudentCascade(
   await tx.student.delete({ where: { id: studentId } });
   await tx.user.delete({ where: { id: userId } });
 
-  return [...documents, ...credentials].map((row) => row.fileUrl);
+  return [
+    ...documents.map((row) => row.fileUrl),
+    ...credentials.map((row) => row.fileUrl),
+    ...journalPhotos.map((row) => row.storagePath),
+  ];
 }
 
 /**

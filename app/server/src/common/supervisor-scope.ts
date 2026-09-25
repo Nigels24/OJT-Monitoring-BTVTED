@@ -27,6 +27,22 @@ export function attendanceEstablishmentWhere(
 }
 
 /**
+ * Whether a JournalEntry is visible to a supervisor at `establishmentId`.
+ *
+ * Same TrainingAssignment-first idea as attendance above, without the legacy
+ * branch: `JournalEntry.trainingAssignmentId` is NOT NULL (no journal predates
+ * the table), so there is never a row with nothing to scope by, and falling
+ * back to `Student.establishmentId` would only ever widen the rule — a student
+ * who transferred *in* would expose the journal they wrote at their previous
+ * establishment.
+ */
+export function journalEstablishmentWhere(
+  establishmentId: string,
+): Prisma.JournalEntryWhereInput {
+  return { trainingAssignment: { establishmentId } };
+}
+
+/**
  * The same rule evaluated in memory against an already-fetched row, for a
  * single-record check (`verifyAttendanceBelongsToSupervisor`) where issuing a
  * second query just to re-express `attendanceEstablishmentWhere` as a `where`

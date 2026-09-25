@@ -53,6 +53,12 @@ enum AssignmentStatus {
   CANCELLED
 }
 
+enum JournalStatus {
+  SUBMITTED
+  ACCEPTED
+  RETURNED
+}
+
 enum NotificationType {
   ATTENDANCE_APPROVED
   ATTENDANCE_DECLINED
@@ -141,6 +147,7 @@ model Coordinator {
   reviewedDocuments Document[]
   blocks            Block[]
   gradedAssignments TrainingAssignment[]
+  reviewedJournals  JournalEntry[]
 }
 
 /// A degree program that places students in OJT, e.g. "BTVTED-CHS".
@@ -240,11 +247,92 @@ model TrainingAssignment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  attendances Attendance[]
-  documents   Document[]
-  evaluations Evaluation[]
+  attendances    Attendance[]
+  documents      Document[]
+  evaluations    Evaluation[]
+  journalEntries JournalEntry[]
 
   @@index([studentId, status])
+}
+
+/// One dated journal entry: what the trainee did on one duty day, with
+/// photographs attached (thesis "Journal Entries and Portfolio Support").
+///
+/// Attached to the TrainingAssignment, not the Student in general — a compiled
+/// journal is *per placement*, ordered by date, so a student who transfers
+/// starts a fresh journal rather than interleaving two establishments' days in
+/// one document. `studentId` is kept alongside it (denormalised from the
+/// assignment) purely so the student's own list and the `[studentId, status]`
+/// index do not have to join through the assignment on every read.
+///
+/// Unlike Attendance, `trainingAssignmentId` is NOT nullable: no journal
+/// predates this table, so there are no unattributed rows to keep, and every
+/// scoping rule (coordinator's block, supervisor's establishment) can rely on
+/// the assignment always being there.
+model JournalEntry {
+  id                   String             @id @default(cuid())
+  trainingAssignmentId String
+  trainingAssignment   TrainingAssignment @relation(fields: [trainingAssignmentId], references: [id])
+  studentId            String
+  student              Student            @relation(fields: [studentId], references: [id])
+
+  /// The duty day being written up, stored as UTC midnight of that calendar
+  /// day like every other date-only column (see src/common/dates.ts).
+  entryDate DateTime @db.Date
+
+  activities String
+  learnings  String?
+
+  status             JournalStatus @default(SUBMITTED)
+  /// The coordinator's written comments. Required by the service on RETURN, and
+  /// deliberately left in place when the student resubmits, so they can still
+  /// see what they were asked to fix until it is reviewed again.
+  coordinatorRemarks String?
+  reviewedById       String?
+  reviewedBy         Coordinator?  @relation(fields: [reviewedById], references: [id])
+  reviewedAt         DateTime?
+
+  /// Reset when a RETURNED entry is edited and resubmitted, the same way
+  /// Attendance.submittedAt is — it is what the review notification's
+  /// dedupeKey uses as its version marker, so a re-review after a
+  /// resubmission notifies again instead of being collapsed.
+  submittedAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos JournalPhoto[]
+
+  /// One entry per duty day per placement. Without this the compiled journal
+  /// could print the same date twice with different contents.
+  @@unique([trainingAssignmentId, entryDate])
+  @@index([studentId, status])
+}
+
+/// A photograph attached to a journal entry.
+///
+/// `onDelete: Cascade` is the second narrow exception to CLAUDE.md §6, for the
+/// same reason `Notification` is: a photo row has no independent meaning or
+/// business consequence once its entry is gone. The *storage object* is not
+/// covered by it — storage is not transactional, so every delete path still
+/// collects `storagePath` and removes the file after the commit.
+model JournalPhoto {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  /// Bucket key inside the private `student-files` bucket (`journals/...`).
+  /// Never a public URL — reads go through a short-lived signed URL.
+  storagePath  String
+  /// The system-applied name (`StudentNo_JOURNAL_<date>_<n>_SURNAME.jpg`), not
+  /// whatever the phone called the file — see src/common/file-upload.ts.
+  originalName String
+  /// Derived from the file's magic bytes, never from the request headers.
+  mimeType     String
+  sizeBytes    Int
+  caption      String?
+  sortOrder    Int
+  createdAt    DateTime @default(now())
 }
 
 model Student {
@@ -299,6 +387,7 @@ model Student {
   credentials         Credential[]
   evaluations         Evaluation[]
   trainingAssignments TrainingAssignment[]
+  journalEntries      JournalEntry[]
 }
 
 model Attendance {
@@ -570,7 +659,7 @@ model Notification {
   // Client-side route the notification navigates to on click, e.g.
   // "/student/attendance". Absolute app path, not a full URL — this system has
   // one client origin.
-  link String?
+  link   String?
 
   // What this notification is about — plain reference fields, read by the
   // client/future call sites, but no longer part of the dedupe key

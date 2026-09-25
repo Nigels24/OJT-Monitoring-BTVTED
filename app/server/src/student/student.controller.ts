@@ -22,14 +22,11 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import {
-  StudentService,
-  MAX_DOCUMENT_SIZE_BYTES,
-  CREDENTIAL_TYPES,
-} from './student.service';
+import { StudentService, CREDENTIAL_TYPES } from './student.service';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { AuthedRequest } from '../auth/authed-request';
 import { EmptyToNull } from '../common/transforms';
+import { MAX_UPLOAD_SIZE_BYTES } from '../common/file-upload';
 
 class SubmitAttendanceDto {
   @IsDateString()
@@ -131,7 +128,7 @@ export class StudentController {
 
   @Post('documents')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_SIZE_BYTES } }),
+    FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_SIZE_BYTES } }),
   )
   uploadDocument(
     @Req() req: AuthedRequest,
@@ -153,7 +150,7 @@ export class StudentController {
 
   @Post('credentials')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_SIZE_BYTES } }),
+    FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_SIZE_BYTES } }),
   )
   uploadCredential(
     @Req() req: AuthedRequest,
