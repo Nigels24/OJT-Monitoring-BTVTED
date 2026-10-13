@@ -7,12 +7,19 @@ import type {
 import { clearSession } from "@/lib/auth";
 
 /**
- * API base URL. Set NEXT_PUBLIC_API_URL to point at a non-local server; the
- * fallback keeps the default dev setup (`npm run start:dev` on :3000) working
- * with no env file.
+ * API base URL: `/api` — this website's own address, which
+ * `app/api/[...path]/route.ts` passes on to the NestJS server.
+ *
+ * Relative on purpose. The browser only ever talks to the address it opened
+ * the site at, so the built pages contain no host or IP and keep working when
+ * the host computer's address changes (CLAUDE.md §20).
+ *
+ * `NEXT_PUBLIC_API_URL` still overrides it for a setup where the browser
+ * should call the API directly (it is baked in at build time, and that
+ * origin must then be listed in the server's `CORS_ORIGINS`). Leave it unset
+ * for the school deployment.
  */
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 const rawBaseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,

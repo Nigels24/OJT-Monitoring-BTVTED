@@ -79,6 +79,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next internals, the favicon, and files in public/.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
+  // Everything except Next internals, the favicon, files in public/, and
+  // `/api` — the pass-through to the NestJS server (app/api/[...path]). The
+  // API does its own authentication, and running the proxy over it would make
+  // Next buffer every upload in memory (capped at 10MB) before forwarding.
+  matcher: ["/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)"],
 };

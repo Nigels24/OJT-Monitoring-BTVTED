@@ -2,11 +2,10 @@ import { slotsLabel } from "@/lib/format";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
-import { Eye, Pencil, Trash2, MessageCircle, Building2, MapPin, User, Phone, Mail, CalendarCheck, Users } from "lucide-react";
+import { Eye, Pencil, Trash2, MessageCircle, Building2 } from "lucide-react";
 import { Establishment } from "@/lib/api/establishmentApi";
 
 interface EstablishmentListProps {
-  establishments: Establishment[];
   isLoading: boolean;
   search: string;
   page: number;
@@ -20,7 +19,6 @@ interface EstablishmentListProps {
 }
 
 export default function EstablishmentList({
-  establishments,
   isLoading,
   search,
   page,
@@ -34,10 +32,13 @@ export default function EstablishmentList({
 }: EstablishmentListProps) {
   const [localSearch, setLocalSearch] = useState(search);
 
-  // Sync local search with parent search prop
-  useEffect(() => {
+  // Sync local search with the parent's search prop. Compared during render
+  // rather than in an effect — see Overlay.tsx's `wasOpen` for the pattern.
+  const [syncedSearch, setSyncedSearch] = useState(search);
+  if (search !== syncedSearch) {
+    setSyncedSearch(search);
     setLocalSearch(search);
-  }, [search]);
+  }
 
   // Debounce search
   useEffect(() => {

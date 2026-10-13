@@ -22,6 +22,7 @@ import { ConcernModule } from './concern/concern.module';
 import { AnnouncementModule } from './announcement/announcement.module';
 import { StudentImportModule } from './student-import/student-import.module';
 import { ReportModule } from './report/report.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ReportModule } from './report/report.module';
     AnnouncementModule,
     StudentImportModule,
     ReportModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

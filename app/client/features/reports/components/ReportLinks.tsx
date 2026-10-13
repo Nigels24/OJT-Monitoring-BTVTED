@@ -9,8 +9,6 @@ interface ReportLinksProps {
   basePath: string;
   /** Left out by a student, whose reports default to their own placement. */
   assignmentId?: string;
-  /** Just the month picker and "Print DTR" — for a table row. */
-  compact?: boolean;
   className?: string;
 }
 
@@ -35,7 +33,6 @@ const OTHER_REPORTS = [
 export default function ReportLinks({
   basePath,
   assignmentId,
-  compact = false,
   className = "",
 }: ReportLinksProps) {
   const [month, setMonth] = useState(currentMonth);
@@ -70,16 +67,15 @@ export default function ReportLinks({
           <span className="text-xs text-gray-400">Pick a month</span>
         )}
       </div>
-      {!compact &&
-        OTHER_REPORTS.map((report) => (
-          <Link
-            key={report.kind}
-            href={`${basePath}/${report.kind}${query({})}`}
-            className="text-xs font-medium text-blue-600 hover:underline"
-          >
-            {report.label}
-          </Link>
-        ))}
+      {OTHER_REPORTS.map((report) => (
+        <Link
+          key={report.kind}
+          href={`${basePath}/${report.kind}${query({})}`}
+          className="text-xs font-medium text-blue-600 hover:underline"
+        >
+          {report.label}
+        </Link>
+      ))}
     </div>
   );
 }

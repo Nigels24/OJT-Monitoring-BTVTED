@@ -1,0 +1,15 @@
+{
+  "name": "ojt-track",
+  "private": true,
+  "description": "Shortcuts for running OJT-Track on the host computer. No dependencies live here — the two apps (app/server, app/client) each have their own. See docs/DEPLOYMENT.md.",
+  "scripts": {
+    "setup": "npm --prefix app/server ci && npm --prefix app/client ci",
+    "db:deploy": "npm --prefix app/server run db:deploy",
+    "seed": "npm --prefix app/server run seed",
+    "build:all": "npm --prefix app/server run build && npm --prefix app/client run build",
+    "start:lan": "node scripts/start-lan.mjs",
+    "health": "node scripts/health.mjs",
+    "backup": "npm --prefix app/server run backup",
+    "restore": "npm --prefix app/server run restore --"
+  }
+}

@@ -19,9 +19,15 @@ export default function PageHeader({
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
-    setNow(new Date());
-    const interval = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(interval);
+    // The clock starts after mount (the server render has no "now" to agree
+    // with), from a timer callback rather than the effect body itself.
+    const tick = () => setNow(new Date());
+    const first = setTimeout(tick, 0);
+    const interval = setInterval(tick, 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(interval);
+    };
   }, []);
 
   return (

@@ -19,7 +19,12 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed": "tsx prisma/seed.ts",
-    "reset-coordinator": "tsx scripts/reset-coordinator.ts"
+    "reset-coordinator": "tsx scripts/reset-coordinator.ts",
+    "storage:pull": "tsx scripts/storage-pull.ts",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "db:deploy": "prisma generate && prisma migrate deploy",
+    "start:lan": "node dist/src/main"
   },
   "dependencies": {
     "@aivangogh/ph-address": "2026.2.1",

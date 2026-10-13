@@ -1326,82 +1326,15 @@ export class CoordinatorService {
   }
 
   /**
-   * Issues a new password for a student or supervisor.
-   *
-   * This is the recovery path: there is no email infrastructure, so a user who
-   * forgets their password asks the coordinator, who sets a new one and passes
-   * it on — the same way the account was issued in the first place.
-   *
-   * Deliberately does NOT require the old password: the whole point is that it
-   * is unknown. That means a coordinator can set any student's or supervisor's
-   * password and sign in as them; that authority is inherent to a system where
-   * the coordinator issues every credential, and it stops at COORDINATOR
-   * accounts, which only the CLI can reset.
-   *
-   * Sets `mustChangePassword` so the coordinator-chosen value here is treated
-   * the same as a coordinator-chosen value at account creation: a temporary
-   * credential the owner is forced to replace on their next sign-in.
-   */
-  async resetStudentPassword(studentId: string, password: string) {
-    const student = await this.prisma.client.student.findUnique({
-      where: { id: studentId },
-      include: { user: { select: { id: true, name: true, username: true } } },
-    });
-    if (!student) {
-      throw new NotFoundException('Student not found');
-    }
-
-    await this.prisma.client.user.update({
-      where: { id: student.userId },
-      data: {
-        password: await bcrypt.hash(password, 10),
-        mustChangePassword: true,
-      },
-    });
-
-    return {
-      id: student.id,
-      name: student.user.name,
-      username: student.user.username,
-      passwordReset: true,
-    };
-  }
-
-  async resetSupervisorPassword(supervisorId: string, password: string) {
-    const supervisor = await this.prisma.client.supervisor.findUnique({
-      where: { id: supervisorId },
-      include: { user: { select: { id: true, name: true, username: true } } },
-    });
-    if (!supervisor) {
-      throw new NotFoundException('Supervisor not found');
-    }
-
-    await this.prisma.client.user.update({
-      where: { id: supervisor.userId },
-      data: {
-        password: await bcrypt.hash(password, 10),
-        mustChangePassword: true,
-      },
-    });
-
-    return {
-      id: supervisor.id,
-      name: supervisor.user.name,
-      username: supervisor.user.username,
-      passwordReset: true,
-    };
-  }
-
-  /**
    * "Resend login": issues a new system-generated temporary password and
    * emails it to the account (CLAUDE.md §16).
    *
-   * This is the system-generated counterpart to the two methods above, keyed
-   * by User id rather than a student/supervisor profile id since it is the
-   * same operation either way — and it is what the coordinator's one button
-   * does; there is no separate "reset password" action beside it. Stops at
-   * COORDINATOR accounts for the reason `resetStudentPassword`'s comment
-   * gives — that authority stays with the `reset-coordinator` CLI script.
+   * This is the only way a coordinator replaces someone's password (the
+   * routes that let one be typed in were removed with Step 15), keyed by User
+   * id rather than a student/supervisor profile id since it is the same
+   * operation either way. It needs no old password — the point is that it is
+   * unknown — and stops at COORDINATOR accounts: that authority stays with
+   * the `reset-coordinator` CLI script.
    *
    * The old password stops working the moment the hash is replaced, and
    * `mustChangePassword` forces a new one at the next sign-in. A session that

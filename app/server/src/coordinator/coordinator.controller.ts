@@ -284,12 +284,6 @@ class CreateStudentDto extends StudentDetailsDto {
 
 class UpdateStudentDto extends StudentDetailsDto {}
 
-class ResetPasswordDto {
-  @IsString()
-  @MinLength(8)
-  password!: string;
-}
-
 class CreatePlacementDto {
   @IsString()
   @IsNotEmpty()
@@ -519,21 +513,6 @@ export class CoordinatorController {
     @Body() dto: SetAssignmentGradeDto,
   ) {
     return this.coordinatorService.setAssignmentGrade(req.user.userId, id, dto);
-  }
-
-  // Recovery for a forgotten password. No current password required — see
-  // CoordinatorService.resetStudentPassword.
-  @Patch('students/:id/password')
-  resetStudentPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
-    return this.coordinatorService.resetStudentPassword(id, dto.password);
-  }
-
-  @Patch('supervisors/:id/password')
-  resetSupervisorPassword(
-    @Param('id') id: string,
-    @Body() dto: ResetPasswordDto,
-  ) {
-    return this.coordinatorService.resetSupervisorPassword(id, dto.password);
   }
 
   /**

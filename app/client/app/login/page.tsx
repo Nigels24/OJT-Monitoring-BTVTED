@@ -98,8 +98,9 @@ export default function LoginPage() {
           : ROLE_HOME[user.role];
 
       router.push(destination);
-    } catch (err: any) {
-      setError(err?.data?.message || "Invalid username or password.");
+    } catch (err: unknown) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      setError(message || "Invalid username or password.");
     }
   };
 

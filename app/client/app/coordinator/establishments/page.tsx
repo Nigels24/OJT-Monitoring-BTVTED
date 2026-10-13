@@ -43,7 +43,6 @@ export default function EstablishmentManagementPage() {
     address,
     setAddress,
     setField,
-    setIsDialogOpen,
     isDialogOpen,
     handleSubmit,
     handleDeleteConfirm,
@@ -90,7 +89,6 @@ export default function EstablishmentManagementPage() {
 
         <Card>
           <EstablishmentList
-            establishments={establishments || []}
             isLoading={isLoading}
             search={search}
             page={page}

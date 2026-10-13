@@ -21,11 +21,14 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — nineteen spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — twenty-two spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
 npm run reset-coordinator            # CLI-only recovery for a locked-out coordinator: [-- '<password>' [<username|email>]]
+npm run storage:pull                 # one-off: copy the Supabase bucket into STORAGE_DIR (§20)
+npm run backup                       # pg_dump + copy of STORAGE_DIR into BACKUP_DIR, keeps 30 (§20)
+npm run restore [-- <backup name>]   # lists backups / restores one after a typed confirmation
 
 npx prisma migrate dev --name <desc> # create + apply a migration
 npx prisma generate                  # REQUIRED after clone/schema change — see below
@@ -34,22 +37,26 @@ npx prisma generate                  # REQUIRED after clone/schema change — se
 npm run dev -- -p 3001               # MUST be 3001; see CORS note in §3
 npm run build
 npm run lint
+npm run start:lan                    # next start -H 0.0.0.0 -p 3001
+
+# repo root — shortcuts only, no dependencies (docs/DEPLOYMENT.md)
+npm run setup | db:deploy | seed | build:all | start:lan | health | backup | restore
 ```
 
 The client has **no test setup** (no test runner in `devDependencies`, no test files) and no README.
 
-`npm run seed` never overwrites or deletes. It creates `coordinator` / `coordinator@wphi.edu` / `admin123` (no forced password change), a second coordinator `coordinator2` with a **generated password printed once**, the `BTVTED-CHS` course with its year-4 requirement (486 hours is a flagged placeholder) and blocks assigned to those coordinators, and the six `DocumentRequirement` rows. `SEED_COORDINATOR_*` env vars override the defaults.
+`npm run seed` never overwrites or deletes. It creates `coordinator` / `coordinator@wphi.edu` with a **generated password printed once** and a forced change at first sign-in (only a dev database that sets `SEED_COORDINATOR_PASSWORD` gets a fixed one with no forced change — there is no built-in default password), a second coordinator `coordinator2` with a **generated password printed once**, the `BTVTED-CHS` course with its year-4 requirement (486 hours is a flagged placeholder) and blocks assigned to those coordinators, and the six `DocumentRequirement` rows. `SEED_COORDINATOR_*` env vars override the defaults.
 
 ### Two things that bite on a fresh clone
 
 - `app/server/generated/prisma` is **gitignored** (custom `prisma-client` generator output, not `node_modules/@prisma/client`). Nothing compiles until `npx prisma generate` runs. Import types from `../../generated/prisma/client`.
-- `app/server/.env` is gitignored (template: `.env.example`) and holds `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, plus the optional mail keys (§16). The server **refuses to boot** without `JWT_SECRET` (`src/auth/jwt.constants.ts` throws; there is deliberately no dev fallback secret). Env is loaded via `import 'dotenv/config'` in `main.ts`, `app.module.ts`, `prisma.config.ts`, and the scripts — there is no `@nestjs/config`.
+- `app/server/.env` is gitignored (template: `.env.example`) and holds `DATABASE_URL`, `JWT_SECRET`, and the optional keys for storage, the network, mail and backups (§16, §20 — `.env.example` annotates every one). `DIRECT_URL` may be blank: `prisma.config.ts` defaults it to `DATABASE_URL`. The server **refuses to boot** without `JWT_SECRET` (`src/auth/jwt.constants.ts` throws; there is deliberately no dev fallback secret). Env is loaded via `import 'dotenv/config'` in `main.ts`, `app.module.ts`, `prisma.config.ts`, and the scripts — there is no `@nestjs/config`.
 
 ## Architecture
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it. `ReportModule` (§19) is in `AppModule` and is read-only.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it. `ReportModule` (§19) is in `AppModule` and is read-only. `FilesModule` (§20) holds the two routes that take no login: `GET /files/:token` and `GET /health`.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -87,7 +94,7 @@ Both cookies are **forgeable client-side** and are routing UX only; the real bou
 
 `IdleSessionManager` (`features/account/components/`, mounted once in `lib/providers.tsx` because there is no shared per-role layout) is the client half of the idle timeout: it calls `/auth/refresh` periodically while there is real activity, warns at 28 minutes, signs out at 30, and syncs activity across tabs through `localStorage`.
 
-**CORS:** `main.ts` allows exactly `http://localhost:3001` and exposes `Content-Disposition` (needed for the evaluation PDF's filename). `next dev` defaults to port 3000, which the API occupies — run the client with `-p 3001` or every request fails.
+**CORS:** browsers reach the API same-origin through the client's `/api` pass-through (§20), so CORS is normally not in play. `main.ts` allows the origins in `CORS_ORIGINS` (default `http://localhost:3001`) for a client that sets `NEXT_PUBLIC_API_URL` and calls the API's port directly, and exposes `Content-Disposition` (the evaluation PDF's filename). `next dev` defaults to port 3000, which the API occupies — run the client with `-p 3001`.
 
 ### 4. Validation, DTO conventions, and dates
 
@@ -118,7 +125,7 @@ The schema has no `onDelete: Cascade` except two documented, narrow exceptions f
 
 ### 7. File storage and uploads
 
-`src/common/storage.ts` wraps a single private Supabase bucket (`student-files`) with three prefixes: `documents/<studentId>/`, `credentials/<studentId>/`, `journals/<studentId>/`. The bucket key is always `<prefix>/<studentId>/<uuid>.<ext>`; signed URLs last 1 hour and are never persisted.
+`src/common/storage.ts` is the whole storage API (`buildObjectPath`, `uploadFile`, `getSignedUrl`, `deleteFile`) over one of two drivers chosen by `STORAGE_DRIVER` — a folder on the host computer (`local`, the default, §20) or the original private Supabase bucket (`student-files`). Callers never know which. Object paths are the same under both, with these prefixes (plus `weekly-tasks/<studentId>/`, §14): `documents/<studentId>/`, `credentials/<studentId>/`, `journals/<studentId>/`. The bucket key is always `<prefix>/<studentId>/<uuid>.<ext>`; signed URLs last 1 hour and are never persisted.
 
 Every upload goes through `src/common/file-upload.ts`:
 
@@ -215,7 +222,7 @@ A new student or supervisor account's temporary password is emailed to the user 
 - **The password rule, in one place** (`CoordinatorService.issueCredentials`): `SENT` → the password is **not** returned to the client at all; `FAILED`/`NOT_CONFIGURED` → it is returned once as `temporaryPassword` for the coordinator to hand over, exactly as before email existed. The email is sent *after* the account is committed and can never fail or roll it back.
 - **Nothing secret is logged or stored.** `MailService` logs recipient, kind and outcome only. `User.credentialsEmailStatus` / `credentialsSentAt` / `credentialsEmailError` record how the last attempt went — `credentialsSentAt` is set only by `SENT` and cleared otherwise, and the error passes through `describeMailError`, which strips the app password and the temporary password and caps the length.
 - **Sends are queued**, one at a time with a ~1s gap (Gmail rate limit), in memory. `sendLoginCredentialsBatch` is the entry point for many recipients. A restart drops what was waiting; "Resend login" is the recovery.
-- **"Resend login"** (`POST /coordinator/users/:userId/resend-login`, `CoordinatorService.resendLogin`) replaced the generated-password reset — one action, not two. It 400s *before* changing anything if the account has no usable email, then replaces the hash, sets `mustChangePassword`, and emails. It does not cut off a session that is already open: tokens are stateless (§2), so that session lasts until its 30-minute token expires. The coordinator-typed `PATCH students/:id/password` and `supervisors/:id/password` routes still exist server-side and send no email; the client no longer calls them.
+- **"Resend login"** (`POST /coordinator/users/:userId/resend-login`, `CoordinatorService.resendLogin`) replaced the generated-password reset — one action, not two. It 400s *before* changing anything if the account has no usable email, then replaces the hash, sets `mustChangePassword`, and emails. It does not cut off a session that is already open: tokens are stateless (§2), so that session lasts until its 30-minute token expires. The coordinator-typed `PATCH students/:id/password` and `supervisors/:id/password` routes were removed in Step 15 — "Resend login" is the only way a coordinator replaces a password.
 - A coordinator-typed password on create is emailed like a generated one, but is never echoed back in the response.
 
 Client: `lib/api/credentialsEmail.ts` (shared shapes), `components/ui/LoginEmailBadge.tsx` (the "Login email" column), `features/account/components/ResendLoginDialog.tsx` (one dialog for both roles). `CredentialsDialog` is now only the fallback for an unsent email and shows the reason.
@@ -266,6 +273,27 @@ The deprecated assignment mirrors on `Student` (§10) are untouched by this.
 
 **Automatic completion.** `common/assignment-completion.ts` is the only definition: approved hours ≥ required, the `PORTFOLIO` document `APPROVED` for that assignment, a supervisor evaluation exists, and a coordinator grade is recorded. `syncAssignmentCompletion(client, assignmentId)` is called wherever one of those inputs changes (attendance approval, document review/coordinator upload, evaluation creation, grade save) — add the call when adding another such path. It only ever moves `ACTIVE → COMPLETED` (a conditional `updateMany`), so a manual `CANCELLED`/`TRANSFERRED`/`COMPLETED` is never reversed or overwritten, and callers wrap it so a failure never fails the action that triggered it. The checklist the UI shows is `loadCompletionChecklist`, the same function.
 
+### 20. Local deployment: one host computer, LAN access, local files, backups
+
+The system runs on one computer inside the school; other devices open `http://<host-ip>:3001`. `docs/DEPLOYMENT.md` is the operator's guide (Windows first) — keep it in step with any change here, and keep both `.env.example` files listing **every** key.
+
+**Same-origin API.** `app/client/app/api/[...path]/route.ts` forwards `/api/*` to `API_INTERNAL_URL` (default `http://127.0.0.1:3000`), streaming bodies both ways. It is a route handler, **not** `rewrites()`: rewrites are frozen into the build by `next build`, and the point is that nothing is rebuilt when the host's IP changes — the env is read when the client starts, and no address is in the built pages. It adds no auth of its own (the `Authorization` header passes through; the API's guards decide). `proxy.ts` **excludes `/api`** from its matcher — the proxy would otherwise buffer every upload in memory, capped at 10MB. Only port 3001 is opened in the firewall; 3000 and 5432 stay closed. The API listens on `HOST` (default `0.0.0.0`).
+
+**Local storage driver** (`common/storage-local.ts`). Files are written under `STORAGE_DIR` (default `app/server/storage`, gitignored, created at boot, never under a static folder) at the same object paths the bucket used. `resolveInside(root, objectPath)` is the **one path-traversal guard** — every read, write and delete goes through it; it resolves and then checks the result is inside the root.
+
+- `getSignedUrl` returns a **relative** `/api/files/<token>` (`FILE_URL_BASE` overrides the prefix), so links survive an IP change too. The token (`common/file-token.ts`) is `base64url(payload).base64url(HMAC-SHA256)` over object path + expiry (+ download name), signed with `FILE_URL_SECRET` (falls back to `JWT_SECRET` with a startup warning), TTL unchanged at 1 hour. Nothing is stored.
+- `GET /files/:token` (`src/files/files.controller.ts`) has **no `AuthGuard` on purpose** — the token is the authorization, as with a Supabase signed URL, which is what lets an `<img>` load. Bad signature or expired → 403; missing file or unsafe path → 404. The path comes only from the verified token. Content-Type is derived from the extension (which the server chose from magic bytes at upload, §7) with `nosniff`; `Content-Disposition` is `attachment` when the link carries a download name and `inline` otherwise — the same split the bucket's `download` option made.
+- `getSignedUrl` throws for a file that is not there, as the bucket does, so `signedUrlOrNull` (§8) still yields "unavailable".
+- `npm run storage:pull` copies the bucket down once (skips files already present, deletes nothing).
+
+**Plain PostgreSQL.** The migrations contain nothing Supabase-specific (no RLS, `auth` schema or extensions; `gen_random_uuid()` is core since PostgreSQL 13) — keep it that way. `npm run db:deploy` is `prisma generate && prisma migrate deploy`.
+
+**Backups** (`scripts/backup.ts`, `restore.ts`; pure rules in `common/backup-plan.ts`). One folder per backup in `BACKUP_DIR`: `ojt-track_YYYY-MM-DD_HHmm/{database.dump, storage/}` — `pg_dump` custom format (found via `PG_BIN_DIR` or PATH, never an npm package) plus a copy of `STORAGE_DIR`. It is built as `<name>.partial` and renamed only on success, so a failed run is never restored from and never causes a good backup to be pruned; pruning keeps the newest 30 and only ever touches exact backup names. Connection settings go to the tools as `PG*` env vars (`pgEnvFromUrl`), not as a URL argument — keeps the password out of the process list and drops Prisma-only query parameters. Restore requires the backup's name to be typed again, refuses to run without a terminal, restores in a single transaction, and renames the current storage folder aside instead of deleting it.
+
+**`GET /health`** (no auth) → `{ status, database, storage }`; reachable from the network as `/api/health`.
+
+Running it: root `package.json` holds shortcut scripts only (no dependencies, not a workspace — the two apps still install separately); `scripts/start-lan.mjs` starts both; `ecosystem.config.cjs` is for a globally installed PM2.
+
 ### Client
 
 Structure convention:
@@ -277,7 +305,7 @@ Structure convention:
 
 Every route under `app/coordinator/`, `app/student/`, `app/supervisor/` is a real, wired page backed by real endpoints — there are no mock-data pages. `establishment` was the first end-to-end vertical slice and is still a reasonable shape to copy for a new domain.
 
-`lib/api/baseQuery.ts` centralizes the API base (`NEXT_PUBLIC_API_URL ?? "http://localhost:3000"`) and auth failures: a 401 clears the session and hard-navigates to `/login?reason=expired`; a 403 with `code: "PASSWORD_CHANGE_REQUIRED"` navigates to `/change-password` without clearing it; `/auth/login` is exempt from both. Slices don't hardcode a `baseUrl` or duplicate this. `useCurrentUser` (`lib/hooks/`) reads the stored user via `useSyncExternalStore` — use it rather than a `useState`/`useEffect` pair over `localStorage`.
+`lib/api/baseQuery.ts` centralizes the API base (`/api`, the same-origin pass-through of §20; `NEXT_PUBLIC_API_URL` overrides it for dev) and auth failures: a 401 clears the session and hard-navigates to `/login?reason=expired`; a 403 with `code: "PASSWORD_CHANGE_REQUIRED"` navigates to `/change-password` without clearing it; `/auth/login` is exempt from both. Slices don't hardcode a `baseUrl` or duplicate this. `useCurrentUser` (`lib/hooks/`) reads the stored user via `useSyncExternalStore` — use it rather than a `useState`/`useEffect` pair over `localStorage`.
 
 The school name is a fixed constant duplicated in `app/server/src/common/school.ts` and `app/client/lib/school.ts` (the projects share no code) — keep the two identical and never make it a setting.
 

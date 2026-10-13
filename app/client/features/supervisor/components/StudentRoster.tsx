@@ -146,13 +146,16 @@ export default function StudentRoster({
     },
     {
       // The trainee's months at THIS establishment — the row's own assignment.
-      key: "dtr",
-      label: "Daily Time Record",
+      // Print DTR plus the attendance summary, progress report, compiled
+      // journal and assessment record — the server decides on each whether
+      // this placement is at the supervisor's establishment.
+      key: "reports",
+      label: "Reports",
       render: (r) => (
         <ReportLinks
           basePath="/supervisor/reports"
           assignmentId={r.assignmentId}
-          compact
+          className="min-w-56"
         />
       ),
     },

@@ -1,4 +1,10 @@
 import 'dotenv/config';
+// The seed is run by tsx, not the Prisma CLI, so `prisma.config.ts` (which
+// defaults DIRECT_URL) is not loaded for it. The client only ever connects
+// through DATABASE_URL, but the fallback is repeated so both agree.
+if (!process.env.DIRECT_URL?.trim() && process.env.DATABASE_URL) {
+  process.env.DIRECT_URL = process.env.DATABASE_URL;
+}
 import { PrismaClient } from '../generated/prisma/client';
 import * as bcrypt from 'bcrypt';
 import { generateTemporaryPassword } from '../src/common/temp-password';
@@ -17,27 +23,32 @@ const prisma = new PrismaClient();
  * description of how accounts really come to exist.)
  *
  * Two coordinators, one per block (Step 5, "two coordinators, one per
- * block"): the first is the known bootstrap account with a fixed,
- * documented password (`mustChangePassword: false` — see its own comment
- * below for why); the second is created the same way `createSupervisor`/
- * `createStudent` create an account with no password supplied — a
- * system-generated temporary one, printed once here, `mustChangePassword:
- * true`.
+ * block"). Both are created the way `createSupervisor`/`createStudent`
+ * create an account with no password supplied: a system-generated temporary
+ * password, printed once here, with `mustChangePassword: true`. The first
+ * takes its email and name from SEED_COORDINATOR_EMAIL / SEED_COORDINATOR_NAME.
+ * Only a development database that sets SEED_COORDINATOR_PASSWORD gets a
+ * fixed password with no forced change.
  *
  * Safe to re-run: each coordinator is a no-op if it already exists. Nothing
  * here ever overwrites an existing password or deletes anything.
  */
 const COORDINATOR = {
-  email: process.env.SEED_COORDINATOR_EMAIL ?? 'coordinator@wphi.edu',
-  username: process.env.SEED_COORDINATOR_USERNAME ?? 'coordinator',
-  name: process.env.SEED_COORDINATOR_NAME ?? 'Admin Coordinator',
-  password: process.env.SEED_COORDINATOR_PASSWORD ?? 'admin123',
+  email: process.env.SEED_COORDINATOR_EMAIL?.trim() || 'coordinator@wphi.edu',
+  username: process.env.SEED_COORDINATOR_USERNAME?.trim() || 'coordinator',
+  name: process.env.SEED_COORDINATOR_NAME?.trim() || 'Admin Coordinator',
+  // No built-in default: on a computer other people can reach over the
+  // network, a password printed in the source is no password. Leave
+  // SEED_COORDINATOR_PASSWORD unset and one is generated, shown once below,
+  // and must be changed at first sign-in. Set it only for a throwaway
+  // development database.
+  password: process.env.SEED_COORDINATOR_PASSWORD?.trim() || undefined,
 };
 
 const COORDINATOR_2 = {
-  email: process.env.SEED_COORDINATOR2_EMAIL ?? 'coordinator2@wphi.edu',
-  username: process.env.SEED_COORDINATOR2_USERNAME ?? 'coordinator2',
-  name: process.env.SEED_COORDINATOR2_NAME ?? 'Block B Coordinator',
+  email: process.env.SEED_COORDINATOR2_EMAIL?.trim() || 'coordinator2@wphi.edu',
+  username: process.env.SEED_COORDINATOR2_USERNAME?.trim() || 'coordinator2',
+  name: process.env.SEED_COORDINATOR2_NAME?.trim() || 'Block B Coordinator',
 };
 
 /**
@@ -74,7 +85,9 @@ async function seedCoordinator(config: {
     return existing.coordinatorProfile.id;
   }
 
-  const generatedPassword = config.password ? null : generateTemporaryPassword();
+  const generatedPassword = config.password
+    ? null
+    : generateTemporaryPassword();
   const password = config.password ?? generatedPassword!;
 
   const user = await prisma.user.create({
@@ -105,9 +118,9 @@ async function seedCoordinator(config: {
     console.log(
       '  This password was generated and is shown once — it will be asked to change on first sign-in.',
     );
-  } else if (!process.env.SEED_COORDINATOR_PASSWORD) {
+  } else {
     console.log(
-      '  This is the default password — change it, or set SEED_COORDINATOR_PASSWORD before seeding.',
+      '  This password came from SEED_COORDINATOR_PASSWORD and will not be asked to change.',
     );
   }
 

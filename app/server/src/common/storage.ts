@@ -1,19 +1,37 @@
 import { randomUUID } from 'crypto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { localDelete, localSignedUrl, localUpload } from './storage-local';
+
+export type StorageDriver = 'local' | 'supabase';
+
+/**
+ * Where uploaded files are kept: a folder on the host computer (`local`, the
+ * default — see `storage-local.ts` and CLAUDE.md §20) or the Supabase bucket
+ * this system started on (`supabase`). The four functions below are the whole
+ * storage API and behave the same under either; no caller knows which is on.
+ */
+export function storageDriver(): StorageDriver {
+  const value = process.env.STORAGE_DRIVER?.trim().toLowerCase();
+  if (!value || value === 'local') return 'local';
+  if (value === 'supabase') return 'supabase';
+  throw new Error(
+    `STORAGE_DRIVER must be "local" or "supabase", not "${process.env.STORAGE_DRIVER}".`,
+  );
+}
 
 /**
  * The single private bucket for student-owned files. Documents and
  * Credentials share it under different prefixes (`documents/<studentId>/`,
  * `credentials/<studentId>/`) — see CLAUDE.md §7 "File storage".
  */
-const BUCKET = 'student-files';
+export const BUCKET = 'student-files';
 
 const DEFAULT_SIGNED_URL_TTL_SECONDS = 60 * 60;
 
 let client: SupabaseClient | null = null;
 
 /** Lazily built so a missing env var fails loudly at first use, not at import time. */
-function getClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient {
   if (client) return client;
 
   const url = process.env.SUPABASE_URL;
@@ -53,7 +71,12 @@ export async function uploadFile(
   buffer: Buffer,
   contentType: string,
 ): Promise<void> {
-  const { error } = await getClient()
+  if (storageDriver() === 'local') {
+    // The type is not stored beside a local file: it is re-derived from the
+    // extension when the file is served (`contentTypeFor`).
+    return localUpload(path, buffer);
+  }
+  const { error } = await getSupabaseClient()
     .storage.from(BUCKET)
     .upload(path, buffer, { contentType, upsert: false });
   if (error) {
@@ -76,7 +99,10 @@ export async function getSignedUrl(
   expiresInSeconds: number = DEFAULT_SIGNED_URL_TTL_SECONDS,
   downloadName?: string,
 ): Promise<string> {
-  const { data, error } = await getClient()
+  if (storageDriver() === 'local') {
+    return localSignedUrl(path, expiresInSeconds, downloadName);
+  }
+  const { data, error } = await getSupabaseClient()
     .storage.from(BUCKET)
     .createSignedUrl(
       path,
@@ -92,7 +118,10 @@ export async function getSignedUrl(
 }
 
 export async function deleteFile(path: string): Promise<void> {
-  const { error } = await getClient().storage.from(BUCKET).remove([path]);
+  if (storageDriver() === 'local') return localDelete(path);
+  const { error } = await getSupabaseClient()
+    .storage.from(BUCKET)
+    .remove([path]);
   if (error) {
     throw new Error(`Failed to delete file from storage: ${error.message}`);
   }
