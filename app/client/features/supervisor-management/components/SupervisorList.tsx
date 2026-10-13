@@ -3,11 +3,12 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCog,
-  KeyRound,
+  Send,
   Trash2,
 } from "lucide-react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import SearchInput from "@/components/ui/SearchInput";
+import LoginEmailBadge from "@/components/ui/LoginEmailBadge";
 import { CoordinatorSupervisor } from "@/lib/api/supervisorManagementApi";
 
 interface SupervisorListProps {
@@ -18,7 +19,7 @@ interface SupervisorListProps {
   paged: CoordinatorSupervisor[];
   onSearchChange: (value: string) => void;
   onPageChange: (page: number) => void;
-  onResetPassword: (supervisor: CoordinatorSupervisor) => void;
+  onResendLogin: (supervisor: CoordinatorSupervisor) => void;
   onDelete: (supervisor: CoordinatorSupervisor) => void;
 }
 
@@ -30,7 +31,7 @@ export default function SupervisorList({
   paged,
   onSearchChange,
   onPageChange,
-  onResetPassword,
+  onResendLogin,
   onDelete,
 }: SupervisorListProps) {
   // Seeded once from the prop. The parent's `search` is only ever changed by
@@ -81,17 +82,22 @@ export default function SupervisorList({
       render: (r) => r.position || "—",
     },
     {
+      key: "loginEmail",
+      label: "Login email",
+      render: (r) => <LoginEmailBadge account={r.user} />,
+    },
+    {
       key: "actions",
       label: "Actions",
       render: (r) => (
         <div className="flex gap-1 md:gap-2">
           <button
-            onClick={() => onResetPassword(r)}
+            onClick={() => onResendLogin(r)}
             className="p-1 md:p-1.5 rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50"
-            aria-label={`Reset ${r.user.name}'s password`}
-            title="Reset password"
+            aria-label={`Resend login to ${r.user.name}`}
+            title="Resend login"
           >
-            <KeyRound size={14} />
+            <Send size={14} />
           </button>
           <button
             onClick={() => onDelete(r)}

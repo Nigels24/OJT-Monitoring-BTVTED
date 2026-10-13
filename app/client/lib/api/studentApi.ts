@@ -5,6 +5,10 @@ import { attendanceOversightApi } from "./attendanceOversightApi";
 import { documentApi } from "./documentApi";
 import { evaluationApi } from "./evaluationApi";
 import { messagesApi } from "./messagesApi";
+import type {
+  AccountEmailStatus,
+  CredentialsEmailResult,
+} from "./credentialsEmail";
 
 export type StudentStatus = "ACTIVE" | "PENDING" | "COMPLETED" | "INACTIVE";
 
@@ -173,13 +177,14 @@ export interface Student {
   completedHours: number;
   hasActiveAssignment: boolean;
   progress: AssignmentProgress;
+  /** The account, with how emailing its login last went. */
   user: {
     id: string;
     email: string;
     username: string | null;
     name: string;
     createdAt: string;
-  };
+  } & AccountEmailStatus;
   establishment?: { id: string; name: string } | null;
   /**
    * Dependent-row counts. The delete confirmation spells these out, since
@@ -230,8 +235,9 @@ export interface CreateStudentRequest extends StudentDetailsRequest {
   email: string;
   /** Login name issued by the coordinator. No "@" allowed. */
   username: string;
-  /** Leave unset and the server generates a readable one, returned once as
-   * `temporaryPassword` on the response. */
+  /** Leave unset and the server generates a readable one and emails it to
+   * the account. It comes back as `temporaryPassword` only if that email
+   * was not sent. */
   password?: string;
   studentIdNumber: string;
   name?: string;
@@ -243,7 +249,13 @@ export interface CreateStudentResponse {
   username: string | null;
   name: string;
   role: string;
-  /** Present only when `password` was omitted from the request. Shown once. */
+  /** How emailing the login went. */
+  credentialsEmail: CredentialsEmailResult;
+  /**
+   * Present only when `password` was omitted from the request **and** the
+   * login email was not sent — the coordinator hands it over instead. Shown
+   * once. When the email was sent, the password never reaches the client.
+   */
   temporaryPassword?: string;
 }
 

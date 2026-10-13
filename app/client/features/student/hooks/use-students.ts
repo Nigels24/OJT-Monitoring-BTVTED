@@ -15,6 +15,7 @@ import {
   useGetMyBlocksQuery,
 } from "@/lib/api/courseApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import { credentialsEmailReason } from "@/lib/api/credentialsEmail";
 
 export const STATUS_OPTIONS: StudentStatus[] = [
   "ACTIVE",
@@ -117,12 +118,15 @@ export function useStudents() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   // Set only when createStudent's response carries a system-generated
-  // temporaryPassword (i.e. the coordinator left the password field blank) —
-  // the "Credentials to release" dialog reads this once, then it's gone.
+  // temporaryPassword — which the server now sends only when the login email
+  // did NOT go out. The "Credentials to release" dialog reads this once, then
+  // it's gone.
   const [credentials, setCredentials] = useState<{
     name: string;
     identifier: string;
     temporaryPassword: string;
+    /** Why it was not emailed — shown above the password. */
+    reason: string;
   } | null>(null);
 
   const { showSuccess, showError } = useSnackbar();
@@ -260,11 +264,17 @@ export function useStudents() {
           ...detailsPayload(),
         }).unwrap();
 
-        if (result.temporaryPassword) {
+        if (result.credentialsEmail.status === "SENT") {
+          // Emailed: the password went to their inbox and never came here.
+          showSuccess(`Login sent to ${result.email}`);
+        } else if (result.temporaryPassword) {
+          // Not emailed: the one-time dialog, with the reason, so the
+          // coordinator can hand the login over.
           setCredentials({
             name: result.name,
             identifier: result.username ?? result.email,
             temporaryPassword: result.temporaryPassword,
+            reason: credentialsEmailReason(result.credentialsEmail),
           });
         } else {
           showSuccess(

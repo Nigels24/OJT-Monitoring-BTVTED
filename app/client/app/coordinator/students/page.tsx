@@ -23,7 +23,7 @@ import StudentList from "@/features/student/components/StudentList";
 import StudentFilterBar from "@/features/student/components/StudentFilterBar";
 import StudentViewDialog from "@/features/student/components/StudentViewDialog";
 import StudentEditDialog from "@/features/student/components/StudentEditDialog";
-import ResetPasswordDialog from "@/features/student/components/ResetPasswordDialog";
+import ResendLoginDialog from "@/features/account/components/ResendLoginDialog";
 import PlacementDialog from "@/features/student/components/PlacementDialog";
 import { deleteStudentMessage } from "@/lib/format";
 
@@ -168,7 +168,7 @@ function StudentManagementPageContent() {
             onDelete={(student) => {
               setDeleteTarget(student);
             }}
-            onResetPassword={(student) => {
+            onResendLogin={(student) => {
               setResetTarget(student);
             }}
             onPlace={(student) => {
@@ -229,8 +229,15 @@ function StudentManagementPageContent() {
         onClose={closeDialog}
       />
 
-      <ResetPasswordDialog
-        student={resetTarget}
+      <ResendLoginDialog
+        target={
+          resetTarget && {
+            userId: resetTarget.userId,
+            name: resetTarget.user.name,
+            email: resetTarget.user.email,
+            identifier: resetTarget.user.username ?? resetTarget.user.email,
+          }
+        }
         onClose={() => {
           setResetTarget(null);
         }}
@@ -242,6 +249,7 @@ function StudentManagementPageContent() {
           name={credentials.name}
           identifier={credentials.identifier}
           temporaryPassword={credentials.temporaryPassword}
+          reason={credentials.reason}
           onClose={closeCredentials}
         />
       )}

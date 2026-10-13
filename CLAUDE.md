@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — five spec files so far, all pure rules or a stubbed-Prisma service (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — eight spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -43,13 +43,13 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 ### Two things that bite on a fresh clone
 
 - `app/server/generated/prisma` is **gitignored** (custom `prisma-client` generator output, not `node_modules/@prisma/client`). Nothing compiles until `npx prisma generate` runs. Import types from `../../generated/prisma/client`.
-- `app/server/.env` is gitignored (template: `.env.example`) and holds `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The server **refuses to boot** without `JWT_SECRET` (`src/auth/jwt.constants.ts` throws; there is deliberately no dev fallback secret). Env is loaded via `import 'dotenv/config'` in `main.ts`, `app.module.ts`, `prisma.config.ts`, and the scripts — there is no `@nestjs/config`.
+- `app/server/.env` is gitignored (template: `.env.example`) and holds `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, plus the optional mail keys (§16). The server **refuses to boot** without `JWT_SECRET` (`src/auth/jwt.constants.ts` throws; there is deliberately no dev fallback secret). Env is loaded via `import 'dotenv/config'` in `main.ts`, `app.module.ts`, `prisma.config.ts`, and the scripts — there is no `@nestjs/config`.
 
 ## Architecture
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16).
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -206,6 +206,19 @@ Four things that look alike and are deliberately kept apart: **messages** are ch
 **Retention.** `MessageRetentionSweepService` deletes `Message` rows older than `MESSAGE_RETENTION_DAYS` (30, `src/common/message-retention.ts`) on boot and every 24h via `setInterval`, with an in-flight guard. Its whole `where` is `expiredMessagesWhere()` — `createdAt` only, so it applies to 1:1 and group alike — and it touches no other table: conversations, participants, concerns, announcements and notifications are never deleted by it. The client shows the 30-day note from its own mirrored constant; keep the two equal.
 
 **Cascade (§6).** Deleting a student deletes their concerns and each placement's thread outright (everyone's messages in it, since the thread has no meaning without the placement). Deleting a supervisor **nulls** `Concern.raisedById` and removes their thread membership via the messaging footprint. `AnnouncementRead` has no cascade and is deleted explicitly with its announcement or its user.
+
+### 16. Login emails and "Resend login"
+
+A new student or supervisor account's temporary password is emailed to the user from the institution's Gmail account, with the system's address. `src/mail/` holds all of it: `mail.config.ts` (env), `credentials-email.template.ts` (the wording — a pure function, edit it freely), `MailService` (transport + queue), `CredentialsEmailService` (send **and** record the outcome on the user row).
+
+- **Mail is optional and never fatal.** `MAIL_ENABLED`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `MAIL_FROM_NAME`, `APP_PUBLIC_URL` are read by `readMailConfig()`; unlike `JWT_SECRET`, a missing one logs a warning and turns sending off. `MailService` never throws — every send resolves to `SENT`, `FAILED` or `NOT_CONFIGURED`.
+- **The password rule, in one place** (`CoordinatorService.issueCredentials`): `SENT` → the password is **not** returned to the client at all; `FAILED`/`NOT_CONFIGURED` → it is returned once as `temporaryPassword` for the coordinator to hand over, exactly as before email existed. The email is sent *after* the account is committed and can never fail or roll it back.
+- **Nothing secret is logged or stored.** `MailService` logs recipient, kind and outcome only. `User.credentialsEmailStatus` / `credentialsSentAt` / `credentialsEmailError` record how the last attempt went — `credentialsSentAt` is set only by `SENT` and cleared otherwise, and the error passes through `describeMailError`, which strips the app password and the temporary password and caps the length.
+- **Sends are queued**, one at a time with a ~1s gap (Gmail rate limit), in memory. `sendLoginCredentialsBatch` is the entry point for many recipients. A restart drops what was waiting; "Resend login" is the recovery.
+- **"Resend login"** (`POST /coordinator/users/:userId/resend-login`, `CoordinatorService.resendLogin`) replaced the generated-password reset — one action, not two. It 400s *before* changing anything if the account has no usable email, then replaces the hash, sets `mustChangePassword`, and emails. It does not cut off a session that is already open: tokens are stateless (§2), so that session lasts until its 30-minute token expires. The coordinator-typed `PATCH students/:id/password` and `supervisors/:id/password` routes still exist server-side and send no email; the client no longer calls them.
+- A coordinator-typed password on create is emailed like a generated one, but is never echoed back in the response.
+
+Client: `lib/api/credentialsEmail.ts` (shared shapes), `components/ui/LoginEmailBadge.tsx` (the "Login email" column), `features/account/components/ResendLoginDialog.tsx` (one dialog for both roles). `CredentialsDialog` is now only the fallback for an unsent email and shows the reason.
 
 ### Client
 

@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/supervisorManagementApi";
 import { useGetEstablishmentsQuery } from "@/lib/api/establishmentApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import { credentialsEmailReason } from "@/lib/api/credentialsEmail";
 
 const EMPTY_FORM = {
   email: "",
@@ -39,6 +40,8 @@ export function useSupervisorManagement() {
     name: string;
     identifier: string;
     temporaryPassword: string;
+    /** Why it was not emailed — shown above the password. */
+    reason: string;
   } | null>(null);
 
   const { showSuccess, showError } = useSnackbar();
@@ -71,11 +74,17 @@ export function useSupervisorManagement() {
         position: form.position || undefined,
       }).unwrap();
 
-      if (result.temporaryPassword) {
+      if (result.credentialsEmail.status === "SENT") {
+        // Emailed: the password went to their inbox and never came here.
+        showSuccess(`Login sent to ${result.email}`);
+      } else if (result.temporaryPassword) {
+        // Not emailed: the one-time dialog, with the reason, so the
+        // coordinator can hand the login over.
         setCredentials({
           name: result.name,
           identifier: result.username ?? result.email,
           temporaryPassword: result.temporaryPassword,
+          reason: credentialsEmailReason(result.credentialsEmail),
         });
       } else {
         showSuccess(

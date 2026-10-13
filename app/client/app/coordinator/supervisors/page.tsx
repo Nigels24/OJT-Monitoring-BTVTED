@@ -13,7 +13,7 @@ import { UserCog, Plus, Building2, UserX } from "lucide-react";
 import { useSupervisorManagement } from "@/features/supervisor-management/hooks/use-supervisor-management";
 import SupervisorList from "@/features/supervisor-management/components/SupervisorList";
 import SupervisorFormDialog from "@/features/supervisor-management/components/SupervisorFormDialog";
-import ResetSupervisorPasswordDialog from "@/features/supervisor-management/components/ResetSupervisorPasswordDialog";
+import ResendLoginDialog from "@/features/account/components/ResendLoginDialog";
 import { deleteSupervisorMessage } from "@/lib/format";
 
 export default function SupervisorManagementPage() {
@@ -101,7 +101,7 @@ export default function SupervisorManagementPage() {
             paged={paged}
             onSearchChange={setSearch}
             onPageChange={setPage}
-            onResetPassword={(supervisor) => {
+            onResendLogin={(supervisor) => {
               setResetTarget(supervisor);
             }}
             onDelete={(supervisor) => {
@@ -141,8 +141,15 @@ export default function SupervisorManagementPage() {
         onClose={closeDialog}
       />
 
-      <ResetSupervisorPasswordDialog
-        supervisor={resetTarget}
+      <ResendLoginDialog
+        target={
+          resetTarget && {
+            userId: resetTarget.userId,
+            name: resetTarget.user.name,
+            email: resetTarget.user.email,
+            identifier: resetTarget.user.username ?? resetTarget.user.email,
+          }
+        }
         onClose={() => {
           setResetTarget(null);
         }}
@@ -154,6 +161,7 @@ export default function SupervisorManagementPage() {
           name={credentials.name}
           identifier={credentials.identifier}
           temporaryPassword={credentials.temporaryPassword}
+          reason={credentials.reason}
           onClose={closeCredentials}
         />
       )}

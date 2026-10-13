@@ -8,12 +8,13 @@ import {
   Trash2,
   Users,
   FileText,
-  KeyRound,
+  Send,
   MapPin,
 } from "lucide-react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import ProgressBar from "@/components/ui/ProgressBar";
 import StatusBadge, { BadgeVariant } from "@/components/ui/StatusBadge";
+import LoginEmailBadge from "@/components/ui/LoginEmailBadge";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
 
 interface StudentListProps {
@@ -27,7 +28,7 @@ interface StudentListProps {
   onView: (student: Student) => void;
   onEdit: (student: Student) => void;
   onDelete: (student: Student) => void;
-  onResetPassword: (student: Student) => void;
+  onResendLogin: (student: Student) => void;
   onPlace: (student: Student) => void;
 }
 
@@ -56,7 +57,7 @@ export default function StudentList({
   onView,
   onEdit,
   onDelete,
-  onResetPassword,
+  onResendLogin,
   onPlace,
 }: StudentListProps) {
   // Seeded once from the prop. The parent's `search` is only ever changed by
@@ -162,6 +163,11 @@ export default function StudentList({
       ),
     },
     {
+      key: "loginEmail",
+      label: "Login email",
+      render: (r) => <LoginEmailBadge account={r.user} />,
+    },
+    {
       key: "status",
       label: "Status",
       render: (r) => (
@@ -199,12 +205,12 @@ export default function StudentList({
             <Pencil size={14} />
           </button>
           <button
-            onClick={() => onResetPassword(r)}
+            onClick={() => onResendLogin(r)}
             className="p-1 md:p-1.5 rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50"
-            aria-label={`Reset ${r.user.name}'s password`}
-            title="Reset password"
+            aria-label={`Resend login to ${r.user.name}`}
+            title="Resend login"
           >
-            <KeyRound size={14} />
+            <Send size={14} />
           </button>
           <button
             onClick={() => onDelete(r)}

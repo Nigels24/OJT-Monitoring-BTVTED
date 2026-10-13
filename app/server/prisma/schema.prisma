@@ -130,6 +130,21 @@ model User {
   // false, so nobody already signed in gets locked into a forced change.
   mustChangePassword Boolean @default(true)
 
+  /// The outcome of the last attempt to email this account its login
+  /// (CLAUDE.md §16) — never the password itself, which is stored only as the
+  /// bcrypt hash above. Rewritten after every attempt, on creation and on
+  /// "Resend login".
+  ///
+  /// `credentialsEmailStatus` is SENT | FAILED | NOT_CONFIGURED, a plain String
+  /// like Document.status. `credentialsSentAt` is set only by a SENT attempt
+  /// and cleared by any other, so it always means "the current temporary
+  /// password was emailed then". `credentialsEmailError` is a short reason for
+  /// the coordinator, with no secrets in it. All three NULL on an account that
+  /// predates this, or one no attempt was ever made for.
+  credentialsSentAt      DateTime?
+  credentialsEmailStatus String?
+  credentialsEmailError  String?
+
   studentProfile     Student?
   supervisorProfile  Supervisor?
   coordinatorProfile Coordinator?

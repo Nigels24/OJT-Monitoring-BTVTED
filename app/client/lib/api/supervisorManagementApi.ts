@@ -3,6 +3,10 @@ import { baseQueryWithAuth } from "./baseQuery";
 import { dashboardApi } from "./dashboardApi";
 import { evaluationApi } from "./evaluationApi";
 import { messagesApi } from "./messagesApi";
+import type {
+  AccountEmailStatus,
+  CredentialsEmailResult,
+} from "./credentialsEmail";
 
 /**
  * The coordinator's view of supervisors (`/coordinator/supervisors`).
@@ -21,7 +25,7 @@ export interface CoordinatorSupervisor {
     username: string | null;
     name: string;
     createdAt: string;
-  };
+  } & AccountEmailStatus;
   establishment?: { id: string; name: string } | null;
   /**
    * What deleting this supervisor would destroy (`evaluations`) versus merely
@@ -35,8 +39,9 @@ export interface CreateSupervisorRequest {
   email: string;
   /** Login name issued by the coordinator. No "@" allowed. */
   username: string;
-  /** Leave unset and the server generates a readable one, returned once as
-   * `temporaryPassword` on the response. */
+  /** Leave unset and the server generates a readable one and emails it to
+   * the account. It comes back as `temporaryPassword` only if that email
+   * was not sent. */
   password?: string;
   name: string;
   establishmentId: string;
@@ -49,7 +54,9 @@ export interface CreateSupervisorResponse {
   username: string | null;
   name: string;
   role: string;
-  /** Present only when `password` was omitted from the request. Shown once. */
+  /** How emailing the login went. */
+  credentialsEmail: CredentialsEmailResult;
+  /** Only when generated and NOT emailed — see `CreateStudentResponse`. */
   temporaryPassword?: string;
 }
 

@@ -61,9 +61,11 @@ class CreateSupervisorDto {
   username!: string;
 
   // Optional: omit it and the service generates a readable temporary
-  // password, returned once in the response as `temporaryPassword`. Either
-  // way the account is created with mustChangePassword = true (the schema
-  // default), so the first sign-in always forces a real change.
+  // password. The login is then emailed to the account; the generated
+  // password comes back in the response as `temporaryPassword` only when
+  // that email was not sent (see `credentialsEmail` there). Either way the
+  // account is created with mustChangePassword = true (the schema default),
+  // so the first sign-in always forces a real change.
   @IsOptional()
   @IsString()
   @MinLength(8)
@@ -221,8 +223,8 @@ class CreateStudentDto extends StudentDetailsDto {
   username!: string;
 
   // Optional: omit it and the service generates a readable temporary
-  // password, returned once in the response as `temporaryPassword` — see
-  // CreateSupervisorDto's `password` for the same behavior.
+  // password — see CreateSupervisorDto's `password` for what is emailed and
+  // what the response then carries.
   @IsOptional()
   @IsString()
   @MinLength(8)
@@ -528,17 +530,22 @@ export class CoordinatorController {
   }
 
   /**
-   * System-generated recovery path, keyed by User id (not the student's or
-   * supervisor's own profile id) since it's the same operation for either
-   * role — see `CoordinatorService.resetPasswordForUser`. Unlike the two
-   * handlers above, the coordinator supplies nothing: a readable temporary
-   * password is generated server-side and returned once as
-   * `temporaryPassword`, the same shape `createStudent`/`createSupervisor`
-   * return when their own `password` field is omitted.
+   * "Resend login": replaces the account's password with a new generated one,
+   * forces a change at the next sign-in, and emails it. Keyed by User id (not
+   * the student's or supervisor's profile id) since it is the same operation
+   * for either role — see `CoordinatorService.resendLogin`.
+   *
+   * The response carries `credentialsEmail: { status, error }`. The new
+   * password is in it (`temporaryPassword`) **only** when the email was not
+   * sent, so the coordinator can hand it over instead; when it was sent the
+   * password never reaches the client.
+   *
+   * Replaces `POST users/:userId/reset-password`, which did the same reset
+   * without the email — one action, not two.
    */
-  @Post('users/:userId/reset-password')
-  resetUserPassword(@Param('userId') userId: string) {
-    return this.coordinatorService.resetPasswordForUser(userId);
+  @Post('users/:userId/resend-login')
+  resendLogin(@Param('userId') userId: string) {
+    return this.coordinatorService.resendLogin(userId);
   }
 
   @Delete('supervisors/:id')

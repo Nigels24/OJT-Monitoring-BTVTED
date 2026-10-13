@@ -13,20 +13,28 @@ interface CredentialsDialogProps {
   identifier: string;
   /** Plaintext, shown once. The caller drops it from state on close. */
   temporaryPassword: string;
+  /**
+   * Why this is on screen rather than in the user's inbox — "Email is not
+   * configured" or "Email failed: …". Omit where no email was attempted.
+   */
+  reason?: string;
   onClose: () => void;
 }
 
 /**
- * "Credentials to release" — shown once, right after the server hands back a
- * system-generated password (account creation with no password typed in, or
- * a coordinator-triggered reset). The password isn't retrievable after this
- * closes: the server only ever returns it in that one response.
+ * "Credentials to release" — the fallback for when the login email did not go
+ * out. A new account's password, or a resent one, is normally emailed straight
+ * to the user and never reaches this client; the server returns it only when
+ * that email was not sent (mail not configured, or the send failed), so the
+ * coordinator can hand it over instead. Shown once: it isn't retrievable after
+ * this closes.
  */
 export default function CredentialsDialog({
   open,
   name,
   identifier,
   temporaryPassword,
+  reason,
   onClose,
 }: CredentialsDialogProps) {
   const [copied, setCopied] = useState(false);
@@ -76,6 +84,11 @@ export default function CredentialsDialog({
         </div>
 
         <div className="p-4 md:p-6 space-y-4">
+          {reason && (
+            <p className="text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 break-words">
+              <span className="font-semibold">Not emailed.</span> {reason}
+            </p>
+          )}
           <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Give this to <strong>{name}</strong> now — it won&apos;t be shown
             again. They&apos;ll be asked to set their own password the first

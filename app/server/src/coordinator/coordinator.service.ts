@@ -46,6 +46,8 @@ import { generateTemporaryPassword } from '../common/temp-password';
 import { NotificationService } from '../notification/notification.service';
 import { OverdueSweepService } from '../notification/overdue-sweep.service';
 import { PlacementThreadService } from '../messages/placement-thread.service';
+import { CredentialsEmailService } from '../mail/credentials-email.service';
+import { MailResult, isDeliverableEmail } from '../mail/mail.service';
 import {
   daysPending,
   overdueAttendanceWhere,
@@ -90,7 +92,66 @@ export class CoordinatorService {
     private notifications: NotificationService,
     private overdueSweep: OverdueSweepService,
     private placementThreads: PlacementThreadService,
+    private credentialsEmail: CredentialsEmailService,
   ) {}
+
+  /**
+   * Emails a just-issued login and shapes what the coordinator gets back
+   * (CLAUDE.md §16). Shared by both create flows and "Resend login" so the
+   * rule about the password is written once:
+   *
+   * - **SENT** — the password went to the account's own inbox, so it is NOT
+   *   returned to the client at all.
+   * - **FAILED / NOT_CONFIGURED** — the email did not go out, so the password
+   *   is returned once for the coordinator to hand over, exactly as it worked
+   *   before there was any email.
+   *
+   * A problem while sending or recording must never undo the account or the
+   * reset that has already been committed, so anything unexpected here is
+   * logged (without the password) and reported as FAILED.
+   */
+  private async issueCredentials(
+    user: {
+      id: string;
+      email: string;
+      name: string;
+      username: string | null;
+      role: string;
+    },
+    temporaryPassword: string,
+    kind: 'CREATED' | 'RESET',
+  ): Promise<{
+    credentialsEmail: MailResult;
+    temporaryPassword: string | undefined;
+  }> {
+    let credentialsEmail: MailResult;
+    try {
+      credentialsEmail = await this.credentialsEmail.deliver({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        username: user.username,
+        role: user.role === 'SUPERVISOR' ? 'SUPERVISOR' : 'STUDENT',
+        temporaryPassword,
+        kind,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Login email for user ${user.id} could not be sent or recorded: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      credentialsEmail = {
+        status: 'FAILED',
+        error: 'The login email could not be sent.',
+      };
+    }
+
+    return {
+      credentialsEmail,
+      temporaryPassword:
+        credentialsEmail.status === 'SENT' ? undefined : temporaryPassword,
+    };
+  }
 
   /** Rejects an email or username already claimed by another account. */
   private async assertCredentialsAvailable(email: string, username: string) {
@@ -232,17 +293,12 @@ export class CoordinatorService {
     await this.assertCredentialsAvailable(data.email, data.username);
 
     // A coordinator-chosen password is honoured; an omitted one gets a
-    // readable generated one, returned in plaintext exactly once below.
-    // `mustChangePassword` isn't set here either way — it's the schema
-    // default (true), correct for both cases: first login always forces a
-    // real change, whether or not the coordinator picked the temp value.
-    const temporaryPassword = data.password
-      ? undefined
-      : generateTemporaryPassword();
-    const hashedPassword = await bcrypt.hash(
-      data.password ?? temporaryPassword!,
-      10,
-    );
+    // readable generated one. Either way it is the account's temporary
+    // password: `mustChangePassword` is the schema default (true), so the
+    // first login always forces a real change, and either way it is what the
+    // login email below carries.
+    const temporaryPassword = data.password ?? generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
     const user = await this.prisma.client.user.create({
       data: {
@@ -277,8 +333,22 @@ export class CoordinatorService {
       );
     }
 
+    // After the account is saved, never as part of saving it: an email that
+    // fails must not fail or roll back the account.
+    const issued = await this.issueCredentials(
+      user,
+      temporaryPassword,
+      'CREATED',
+    );
+
     const { password, ...result } = user;
-    return { ...result, temporaryPassword };
+    return {
+      ...result,
+      ...issued,
+      // A password the coordinator typed is one they already have; only a
+      // generated one ever needs showing.
+      temporaryPassword: data.password ? undefined : issued.temporaryPassword,
+    };
   }
 
   async createStudent(
@@ -309,16 +379,10 @@ export class CoordinatorService {
 
     const resolved = await this.resolveCourseFields(data, null, null);
 
-    // See createSupervisor's comment: omitted password -> generated one,
-    // returned once; mustChangePassword stays the schema default (true)
-    // either way.
-    const temporaryPassword = data.password
-      ? undefined
-      : generateTemporaryPassword();
-    const hashedPassword = await bcrypt.hash(
-      data.password ?? temporaryPassword!,
-      10,
-    );
+    // See createSupervisor's comment: omitted password -> generated one;
+    // mustChangePassword stays the schema default (true) either way.
+    const temporaryPassword = data.password ?? generateTemporaryPassword();
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
     // User and Student are separate rows. Without a transaction a failure on
     // the second write would leave a login with no profile, which every
@@ -349,8 +413,19 @@ export class CoordinatorService {
       });
     });
 
+    // After the transaction has committed — see createSupervisor.
+    const issued = await this.issueCredentials(
+      user,
+      temporaryPassword,
+      'CREATED',
+    );
+
     const { password, ...result } = user;
-    return { ...result, temporaryPassword };
+    return {
+      ...result,
+      ...issued,
+      temporaryPassword: data.password ? undefined : issued.temporaryPassword,
+    };
   }
 
   /**
@@ -414,15 +489,7 @@ export class CoordinatorService {
     const students = await this.prisma.client.student.findMany({
       where,
       include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            username: true,
-            name: true,
-            createdAt: true,
-          },
-        },
+        user: { select: ACCOUNT_SELECT },
         establishment: { select: { id: true, name: true } },
         // At most one ACTIVE row per student — nothing enforces that in the
         // schema, but `createPlacement` always transfers the prior one out
@@ -566,15 +633,7 @@ export class CoordinatorService {
   async listSupervisors() {
     return this.prisma.client.supervisor.findMany({
       include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            username: true,
-            name: true,
-            createdAt: true,
-          },
-        },
+        user: { select: ACCOUNT_SELECT },
         establishment: { select: { id: true, name: true } },
         // What deleting this supervisor would take with it (evaluations) and
         // what it would merely un-attribute (attendance approvals). The
@@ -1173,16 +1232,39 @@ export class CoordinatorService {
   }
 
   /**
-   * The system-generated counterpart to the two methods above, keyed by User
-   * id rather than a student/supervisor profile id since it's the same
-   * operation either way. Stops at COORDINATOR accounts for the same reason
-   * `resetStudentPassword`'s comment gives — that authority stays with the
-   * `reset-coordinator` CLI script, never the web app, coordinator included.
+   * "Resend login": issues a new system-generated temporary password and
+   * emails it to the account (CLAUDE.md §16).
+   *
+   * This is the system-generated counterpart to the two methods above, keyed
+   * by User id rather than a student/supervisor profile id since it is the
+   * same operation either way — and it is what the coordinator's one button
+   * does; there is no separate "reset password" action beside it. Stops at
+   * COORDINATOR accounts for the reason `resetStudentPassword`'s comment
+   * gives — that authority stays with the `reset-coordinator` CLI script.
+   *
+   * The old password stops working the moment the hash is replaced, and
+   * `mustChangePassword` forces a new one at the next sign-in. A session that
+   * is already open is not cut off here, because nothing in this app can do
+   * that (tokens are stateless, §2): it ends when its 30-minute token does,
+   * and `/auth/refresh` re-reads the row, so it cannot outlive that without
+   * meeting the forced change.
+   *
+   * The email address is checked *before* anything is changed: resending to
+   * an account with no usable address would replace a working password for
+   * nothing, so that is a 400 with the password left as it was. (Mail being
+   * switched off is different — then the new password is simply shown to the
+   * coordinator, as on creation.)
    */
-  async resetPasswordForUser(userId: string) {
+  async resendLogin(userId: string) {
     const user = await this.prisma.client.user.findUnique({
       where: { id: userId },
-      select: { id: true, role: true, name: true, username: true },
+      select: {
+        id: true,
+        role: true,
+        name: true,
+        username: true,
+        email: true,
+      },
     });
     if (!user) {
       throw new NotFoundException('Account not found');
@@ -1190,6 +1272,11 @@ export class CoordinatorService {
     if (user.role === 'COORDINATOR') {
       throw new BadRequestException(
         'Coordinator accounts cannot be reset here — run the reset-coordinator CLI script instead.',
+      );
+    }
+    if (!isDeliverableEmail(user.email)) {
+      throw new BadRequestException(
+        `${user.name} has no valid email address on file, so a login cannot be emailed. Correct the email address first.`,
       );
     }
 
@@ -1202,11 +1289,18 @@ export class CoordinatorService {
       },
     });
 
+    const issued = await this.issueCredentials(
+      user,
+      temporaryPassword,
+      'RESET',
+    );
+
     return {
       id: user.id,
       name: user.name,
       username: user.username,
-      temporaryPassword,
+      email: user.email,
+      ...issued,
     };
   }
 
@@ -1729,6 +1823,22 @@ const ASSIGNMENT_ASSESSMENT_INCLUDE = {
     },
     orderBy: { createdAt: 'desc' },
   },
+} as const;
+
+/**
+ * The account columns a roster row shows. Never the password hash — and the
+ * three `credentials*` columns are the *outcome* of emailing the login, not
+ * the login itself.
+ */
+const ACCOUNT_SELECT = {
+  id: true,
+  email: true,
+  username: true,
+  name: true,
+  createdAt: true,
+  credentialsSentAt: true,
+  credentialsEmailStatus: true,
+  credentialsEmailError: true,
 } as const;
 
 const MS_PER_WEEK = 7 * MS_PER_DAY;
