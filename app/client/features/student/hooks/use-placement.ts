@@ -43,6 +43,10 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
   const [academicYear, setAcademicYear] = useState(DEFAULT_ACADEMIC_YEAR);
   const [blockId, setBlockId] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmedFull, setConfirmedFull] = useState(false);
+  // Set when the server itself says the establishment is full — the slot
+  // count shown here may be a moment out of date.
+  const [serverSaysFull, setServerSaysFull] = useState(false);
   const [error, setError] = useState("");
 
   // Resets the whole form whenever the dialog's target student changes
@@ -61,6 +65,8 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     setAcademicYear(DEFAULT_ACADEMIC_YEAR);
     setBlockId("");
     setConfirmed(false);
+    setConfirmedFull(false);
+    setServerSaysFull(false);
     setError("");
   }
   // A different establishment invalidates any hours typed for the previous
@@ -69,6 +75,9 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
   if (establishmentId !== prevEstablishmentId) {
     setPrevEstablishmentId(establishmentId);
     setRequiredHoursOverride(null);
+    // Agreeing to overfill one establishment is not agreeing to another.
+    setConfirmedFull(false);
+    setServerSaysFull(false);
   }
 
   const { showSuccess, showError } = useSnackbar();
@@ -103,6 +112,24 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     requiredHoursOverride ??
     (defaults ? String(defaults.requiredHours) : "");
 
+  // Slots at the chosen establishment. Informational plus a confirmation —
+  // a full establishment is never a hard block, and the server enforces the
+  // same confirmation (`confirmFull`) whatever this dialog shows.
+  const slots =
+    defaults?.establishment && defaults.establishment.id === establishmentId
+      ? {
+          traineeSlots: defaults.establishment.traineeSlots,
+          activeTrainees: defaults.establishment.activeTrainees,
+        }
+      : null;
+  const isFull =
+    serverSaysFull ||
+    (!!slots &&
+      slots.traineeSlots !== null &&
+      slots.activeTrainees >= slots.traineeSlots &&
+      // Re-recording at the establishment they are already at takes no new slot.
+      activeAssignment?.establishmentId !== establishmentId);
+
   const [createPlacement, { isLoading: isSubmitting }] =
     useCreatePlacementMutation();
 
@@ -118,7 +145,8 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     dutyDays.length > 0 &&
     !!startDate &&
     !!academicYear &&
-    (!activeAssignment || confirmed);
+    (!activeAssignment || confirmed) &&
+    (!isFull || confirmedFull);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -133,6 +161,7 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
         academicYear,
         requiredHours: requiredHours ? Number(requiredHours) : undefined,
         blockId: blockId || undefined,
+        confirmFull: isFull && confirmedFull ? true : undefined,
       }).unwrap();
       showSuccess(
         activeAssignment
@@ -142,6 +171,14 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
       onPlaced();
     } catch (err: unknown) {
       const message = readError(err, "Failed to record placement.");
+      if (
+        (err as { data?: { code?: string } })?.data?.code ===
+        "ESTABLISHMENT_FULL"
+      ) {
+        // Filled up since the dialog loaded: ask for the confirmation now.
+        setServerSaysFull(true);
+        setConfirmedFull(false);
+      }
       setError(message);
       showError(message);
     }
@@ -170,6 +207,10 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     activeAssignment,
     confirmed,
     setConfirmed,
+    slots,
+    isFull,
+    confirmedFull,
+    setConfirmedFull,
     canSubmit,
     isSubmitting,
     error,

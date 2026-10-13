@@ -24,6 +24,7 @@ import {
 } from 'class-validator';
 import { EstablishmentService } from './establishment.service';
 import { Roles, RolesGuard } from '../auth/roles.guard';
+import { ToNullableNumber } from '../common/transforms';
 
 class CreateEstablishmentDto {
   @IsString()
@@ -65,6 +66,15 @@ class CreateEstablishmentDto {
   @IsString()
   @MaxLength(20)
   zipCode?: string;
+
+  // How many trainees the establishment can take at once. Nullable column, so
+  // ToNullableNumber: an emptied box clears it back to "not set".
+  @IsOptional()
+  @ToNullableNumber()
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  traineeSlots?: number | null;
 
   @IsOptional()
   @IsIn(['ACTIVE', 'INACTIVE'])

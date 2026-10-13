@@ -14,6 +14,7 @@ import {
   useGetCoursesQuery,
   useGetMyBlocksQuery,
 } from "@/lib/api/courseApi";
+import type { TrainingStatus } from "@/features/reports/filters";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import { credentialsEmailReason } from "@/lib/api/credentialsEmail";
 import type { AddressValue } from "@/lib/hooks/use-address-picker";
@@ -78,11 +79,21 @@ function useRosterUrlState() {
   const academicYear = searchParams.get("academicYear") ?? "";
   const status = searchParams.get("status") ?? "";
 
-  const setParam = useCallback(
-    (key: string, value: string) => {
+  const academicYearFrom = searchParams.get("academicYearFrom") ?? "";
+  const academicYearTo = searchParams.get("academicYearTo") ?? "";
+  const establishmentId = searchParams.get("establishmentId") ?? "";
+  const trainingStatus = searchParams.get("trainingStatus") ?? "";
+
+  // One navigation per change, whatever it touches: several `router.replace`
+  // calls in a row each start from the same stale query string, and only the
+  // last one would survive.
+  const setParams = useCallback(
+    (patch: Record<string, string>) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (value) params.set(key, value);
-      else params.delete(key);
+      for (const [key, value] of Object.entries(patch)) {
+        if (value) params.set(key, value);
+        else params.delete(key);
+      }
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -95,23 +106,42 @@ function useRosterUrlState() {
     yearLevel,
     blockId,
     academicYear,
+    academicYearFrom,
+    academicYearTo,
+    establishmentId,
+    trainingStatus,
     status,
+    /** The filters as they stand in the URL — what the summary link carries. */
+    queryString: searchParams.toString(),
     setScope: (value: "block" | "all") =>
-      setParam("scope", value === "all" ? "all" : ""),
-    setCourseId: (value: string) => {
-      setParam("courseId", value);
-      // A course change invalidates whatever year level/block was picked
-      // for the old one.
-      setParam("yearLevel", "");
-      setParam("blockId", "");
-    },
-    setYearLevel: (value: string) => {
-      setParam("yearLevel", value);
-      setParam("blockId", "");
-    },
-    setBlockId: (value: string) => setParam("blockId", value),
-    setAcademicYear: (value: string) => setParam("academicYear", value),
-    setStatus: (value: string) => setParam("status", value),
+      setParams({ scope: value === "all" ? "all" : "" }),
+    // A course change invalidates whatever year level/block was picked for
+    // the old one.
+    setCourseId: (value: string) =>
+      setParams({ courseId: value, yearLevel: "", blockId: "" }),
+    setYearLevel: (value: string) =>
+      setParams({ yearLevel: value, blockId: "" }),
+    setBlockId: (value: string) => setParams({ blockId: value }),
+    // One academic year or a range of them, never both.
+    setAcademicYear: (value: string) =>
+      setParams({
+        academicYear: value,
+        ...(value ? { academicYearFrom: "", academicYearTo: "" } : {}),
+      }),
+    setAcademicYearFrom: (value: string) =>
+      setParams({
+        academicYearFrom: value,
+        ...(value ? { academicYear: "" } : {}),
+      }),
+    setAcademicYearTo: (value: string) =>
+      setParams({
+        academicYearTo: value,
+        ...(value ? { academicYear: "" } : {}),
+      }),
+    setEstablishmentId: (value: string) =>
+      setParams({ establishmentId: value }),
+    setTrainingStatus: (value: string) => setParams({ trainingStatus: value }),
+    setStatus: (value: string) => setParams({ status: value }),
   };
 }
 
@@ -146,6 +176,12 @@ export function useStudents() {
       yearLevel: roster.yearLevel ? Number(roster.yearLevel) : undefined,
       blockId: roster.blockId || undefined,
       academicYear: roster.academicYear || undefined,
+      academicYearFrom: roster.academicYearFrom || undefined,
+      academicYearTo: roster.academicYearTo || undefined,
+      establishmentId: roster.establishmentId || undefined,
+      trainingStatus: (roster.trainingStatus || undefined) as
+        | TrainingStatus
+        | undefined,
       status: (roster.status || undefined) as StudentStatus | undefined,
     }),
     [
@@ -154,6 +190,10 @@ export function useStudents() {
       roster.yearLevel,
       roster.blockId,
       roster.academicYear,
+      roster.academicYearFrom,
+      roster.academicYearTo,
+      roster.establishmentId,
+      roster.trainingStatus,
       roster.status,
     ],
   );

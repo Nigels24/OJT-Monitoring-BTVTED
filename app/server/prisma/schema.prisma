@@ -170,6 +170,11 @@ model Establishment {
   city                     String?
   province                 String?
   zipCode                  String?
+  /// How many trainees the establishment can take at once. NULL = not set
+  /// (no limit is shown). Compared against its ACTIVE training assignments to
+  /// show "X of Y slots used"; a full establishment warns, it does not block
+  /// (CLAUDE.md §19).
+  traineeSlots             Int?
   status                   EstablishmentStatus @default(ACTIVE)
   coordinatorFirstName     String?
   coordinatorLastName      String?

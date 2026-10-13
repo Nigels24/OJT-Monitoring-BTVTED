@@ -18,6 +18,8 @@ interface EstablishmentInput {
   city?: string;
   province?: string;
   zipCode?: string;
+  /** `null` = cleared back to "not set"; absent = leave unchanged. */
+  traineeSlots?: number | null;
   status?: 'ACTIVE' | 'INACTIVE';
   coordinatorFirstName?: string;
   coordinatorLastName?: string;
@@ -44,15 +46,30 @@ export class EstablishmentService {
     });
   }
 
+  /**
+   * Every establishment, each with `activeTrainees` — its placements in
+   * progress, which is what `traineeSlots` is compared against ("X of Y slots
+   * used"). Counted from ACTIVE training assignments, not from the deprecated
+   * `Student.establishmentId` mirror that `_count.students` reads.
+   */
   async findAll() {
-    return this.prisma.client.establishment.findMany({
+    const establishments = await this.prisma.client.establishment.findMany({
       include: {
         _count: {
-          select: { students: true, supervisors: true },
+          select: {
+            students: true,
+            supervisors: true,
+            trainingAssignments: { where: { status: 'ACTIVE' } },
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
+    return establishments.map(({ _count, ...establishment }) => ({
+      ...establishment,
+      _count: { students: _count.students, supervisors: _count.supervisors },
+      activeTrainees: _count.trainingAssignments,
+    }));
   }
 
   async findOne(id: string) {

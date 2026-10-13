@@ -145,3 +145,20 @@ export function deleteEstablishmentMessage(
     "This cannot be undone."
   );
 }
+
+/**
+ * An establishment's trainee capacity, e.g. "3 of 5 slots used (2 left)".
+ * `slots` is `null` when the establishment has no limit recorded.
+ */
+export function slotsLabel(
+  activeTrainees: number,
+  slots: number | null | undefined,
+): string {
+  if (slots === null || slots === undefined) {
+    return `${activeTrainees} active \u00b7 no slot limit`;
+  }
+  const left = slots - activeTrainees;
+  return `${activeTrainees} of ${slots} slots used (${
+    left >= 0 ? `${left} left` : `${-left} over`
+  })`;
+}

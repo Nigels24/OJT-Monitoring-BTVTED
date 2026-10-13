@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { TRAINING_STATUS_LABEL } from "@/features/reports/filters";
 import {
   Search,
   ChevronLeft,
@@ -166,6 +167,19 @@ export default function StudentList({
       key: "loginEmail",
       label: "Login email",
       render: (r) => <LoginEmailBadge account={r.user} />,
+    },
+    {
+      // Where the training stands, from the student's placements — distinct
+      // from the account status in the next column.
+      key: "trainingStatus",
+      label: "Training",
+      render: (r) => (
+        <span className="whitespace-nowrap text-xs text-gray-700">
+          {r.trainingStatus
+            ? (TRAINING_STATUS_LABEL[r.trainingStatus] ?? r.trainingStatus)
+            : "—"}
+        </span>
+      ),
     },
     {
       key: "status",

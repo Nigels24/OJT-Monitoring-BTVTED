@@ -21,6 +21,7 @@ import {
   totalRating,
 } from '../common/evaluation-scoring';
 import { GRADED_BY_SELECT } from '../common/assignment-grade';
+import { syncAssignmentCompletion } from '../common/assignment-completion';
 import { CASCADE_TRANSACTION_OPTIONS } from '../common/cascade-delete';
 import { EvaluationTemplateService } from '../evaluation-template/evaluation-template.service';
 import { NotificationService } from '../notification/notification.service';
@@ -388,7 +389,27 @@ export class SupervisorService {
       dedupeKey: `ATTENDANCE_APPROVED:${attendanceId}:${updated.submittedAt.toISOString()}`,
     });
 
+    // Approved hours reaching the requirement is one of the four completion
+    // conditions. Approval itself is unchanged by this.
+    await this.syncCompletion(updated.trainingAssignmentId);
+
     return updated;
+  }
+
+  /**
+   * Re-checks whether a placement is now complete, after a write that could
+   * make it so (CLAUDE.md §19). Never throws — the write it follows has
+   * already succeeded and must not be reported as failed because of this.
+   */
+  private async syncCompletion(assignmentId: string | null | undefined) {
+    try {
+      await syncAssignmentCompletion(this.prisma.client, assignmentId);
+    } catch (err) {
+      this.logger.error(
+        `Completion check for assignment ${assignmentId} failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   async declineAttendance(
@@ -489,6 +510,10 @@ export class SupervisorService {
       },
       include: EVALUATION_INCLUDE,
     });
+
+    // The supervisor's evaluation existing is one of the four completion
+    // conditions.
+    await this.syncCompletion(assignment.id);
 
     // Same shape as the list endpoints, so a freshly created evaluation can be
     // rendered without a refetch.

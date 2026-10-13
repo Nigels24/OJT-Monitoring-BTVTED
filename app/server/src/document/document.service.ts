@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { DocumentStage, Prisma } from '../../generated/prisma/client';
+import { syncAssignmentCompletion } from '../common/assignment-completion';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { DOCUMENT_STAGES } from '../common/document-requirements';
@@ -252,13 +253,39 @@ export class DocumentService {
     file: Express.Multer.File | undefined,
   ) {
     const coordinator = await this.getCoordinatorByUserId(userId);
-    return this.upload({
+    const uploaded = await this.upload({
       studentId,
       requirementId,
       file,
       uploadedByUserId: userId,
       reviewedByCoordinatorId: coordinator.id,
     });
+
+    // Stored already APPROVED, so a portfolio uploaded this way can complete
+    // the placement just as a reviewed one can.
+    const stored = await this.prisma.client.document.findUnique({
+      where: { id: uploaded.id },
+      select: { trainingAssignmentId: true },
+    });
+    await this.syncCompletion(stored?.trainingAssignmentId);
+
+    return uploaded;
+  }
+
+  /**
+   * Re-checks whether a placement is now complete, after a write that could
+   * make it so (CLAUDE.md §19). Never throws — the write it follows has
+   * already succeeded and must not be reported as failed because of this.
+   */
+  private async syncCompletion(assignmentId: string | null | undefined) {
+    try {
+      await syncAssignmentCompletion(this.prisma.client, assignmentId);
+    } catch (err) {
+      this.logger.error(
+        `Completion check for assignment ${assignmentId} failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   private async upload(params: {
@@ -447,6 +474,9 @@ export class DocumentService {
       // convention as ATTENDANCE_APPROVED and the journal review.
       dedupeKey: `DOCUMENT_REVIEWED:${documentId}:${updated.uploadedAt.toISOString()}`,
     });
+
+    // An accepted portfolio is one of the four completion conditions.
+    if (approved) await this.syncCompletion(updated.trainingAssignmentId);
 
     return this.presentDocument(updated);
   }

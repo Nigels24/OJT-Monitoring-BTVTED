@@ -2,6 +2,10 @@ import { Users, Globe } from "lucide-react";
 import SelectField from "@/components/ui/SelectField";
 import { StudentStatus } from "@/lib/api/studentApi";
 import { Block, Course } from "@/lib/api/courseApi";
+import {
+  TRAINING_STATUS_LABEL,
+  TRAINING_STATUS_OPTIONS,
+} from "@/features/reports/filters";
 
 const STATUS_LABEL: Record<StudentStatus, string> = {
   ACTIVE: "Active",
@@ -18,7 +22,12 @@ interface StudentFilterBarProps {
   yearLevel: string;
   blockId: string;
   academicYear: string;
+  academicYearFrom: string;
+  academicYearTo: string;
+  establishmentId: string;
+  trainingStatus: string;
   status: string;
+  establishments: { id: string; name: string }[];
   courses: Course[];
   filterBlocks: Block[];
   statusOptions: StudentStatus[];
@@ -27,12 +36,17 @@ interface StudentFilterBarProps {
   onYearLevelChange: (value: string) => void;
   onBlockChange: (value: string) => void;
   onAcademicYearChange: (value: string) => void;
+  onAcademicYearFromChange: (value: string) => void;
+  onAcademicYearToChange: (value: string) => void;
+  onEstablishmentChange: (value: string) => void;
+  onTrainingStatusChange: (value: string) => void;
   onStatusChange: (value: string) => void;
 }
 
 /**
  * "My Block / All Program" toggle plus course/year level/block/academic
- * year/status filters (Table 1: a coordinator sees their own block's
+ * year (one, or a range)/establishment/training status/account status filters
+ * — all applied by the server and all kept in the URL (Table 1: a coordinator sees their own block's
  * trainees by default and can switch to a program-wide view).
  */
 export default function StudentFilterBar({
@@ -43,7 +57,12 @@ export default function StudentFilterBar({
   yearLevel,
   blockId,
   academicYear,
+  academicYearFrom,
+  academicYearTo,
+  establishmentId,
+  trainingStatus,
   status,
+  establishments,
   courses,
   filterBlocks,
   statusOptions,
@@ -52,12 +71,22 @@ export default function StudentFilterBar({
   onYearLevelChange,
   onBlockChange,
   onAcademicYearChange,
+  onAcademicYearFromChange,
+  onAcademicYearToChange,
+  onEstablishmentChange,
+  onTrainingStatusChange,
   onStatusChange,
 }: StudentFilterBarProps) {
   const selectedCourse = courses.find((c) => c.id === courseId) ?? null;
   const yearLevelOptions = (selectedCourse?.requirements ?? [])
     .map((r) => r.yearLevel)
     .sort((a, b) => a - b);
+  // Every academic year any block has, whichever course is picked: the year
+  // filters work without a course.
+  const academicYears = Array.from(
+    new Set(courses.flatMap((c) => (c.blocks ?? []).map((b) => b.academicYear))),
+  ).sort();
+  const yearOptions = academicYears.map((year) => ({ label: year, value: year }));
 
   return (
     <div className="mb-4 space-y-3">
@@ -145,17 +174,48 @@ export default function StudentFilterBar({
           placeholder="All Academic Years"
           options={[
             { label: "All Academic Years", value: "" },
-            ...Array.from(
-              new Set((selectedCourse?.blocks ?? []).map((b) => b.academicYear)),
-            ).map((year) => ({ label: year, value: year })),
+            ...yearOptions,
+          ]}
+        />
+        <SelectField
+          value={academicYearFrom}
+          onChange={onAcademicYearFromChange}
+          placeholder="A.Y. from"
+          options={[{ label: "A.Y. from (any)", value: "" }, ...yearOptions]}
+        />
+        <SelectField
+          value={academicYearTo}
+          onChange={onAcademicYearToChange}
+          placeholder="A.Y. to"
+          options={[{ label: "A.Y. to (any)", value: "" }, ...yearOptions]}
+        />
+        <SelectField
+          value={establishmentId}
+          onChange={onEstablishmentChange}
+          placeholder="All Establishments"
+          options={[
+            { label: "All Establishments", value: "" },
+            ...establishments.map((e) => ({ label: e.name, value: e.id })),
+          ]}
+        />
+        <SelectField
+          value={trainingStatus}
+          onChange={onTrainingStatusChange}
+          placeholder="All Training Statuses"
+          options={[
+            { label: "All Training Statuses", value: "" },
+            ...TRAINING_STATUS_OPTIONS.map((s) => ({
+              label: TRAINING_STATUS_LABEL[s],
+              value: s,
+            })),
           ]}
         />
         <SelectField
           value={status}
           onChange={onStatusChange}
-          placeholder="All Statuses"
+          placeholder="All Account Statuses"
           options={[
-            { label: "All Statuses", value: "" },
+            { label: "All Account Statuses", value: "" },
             ...statusOptions.map((s) => ({ label: STATUS_LABEL[s], value: s })),
           ]}
         />

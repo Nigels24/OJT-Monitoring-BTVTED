@@ -113,6 +113,22 @@ export default function EstablishmentForm({
               className="w-full"
             />
           </div>
+          <div>
+            <TextField
+              label="Trainee Slots"
+              type="number"
+              min={0}
+              max={10000}
+              step={1}
+              value={form.traineeSlots}
+              onChange={setField("traineeSlots")}
+              placeholder="No limit"
+            />
+            <p className="text-xs text-gray-500 mt-1.5">
+              How many trainees this establishment can take at once. Leave
+              blank if there is no limit.
+            </p>
+          </div>
         </div>
       </div>
 

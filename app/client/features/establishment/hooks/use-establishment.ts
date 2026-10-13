@@ -35,6 +35,8 @@ const EMPTY_FORM = {
   province: "",
   zipCode: "",
   status: "ACTIVE" as "ACTIVE" | "INACTIVE",
+  /** "" = no limit recorded. */
+  traineeSlots: "",
   coordinatorFirstName: "",
   coordinatorLastName: "",
   coordinatorMiddleInitial: "",
@@ -112,6 +114,9 @@ export function useEstablishment() {
           province: form.province || undefined,
           zipCode: zipCode(),
           status: form.status,
+          traineeSlots: form.traineeSlots
+            ? Number(form.traineeSlots)
+            : undefined,
           coordinatorFirstName: form.coordinatorFirstName || undefined,
           coordinatorLastName: form.coordinatorLastName || undefined,
           coordinatorMiddleInitial: form.coordinatorMiddleInitial || undefined,
@@ -156,6 +161,8 @@ export function useEstablishment() {
         province: form.province || undefined,
         zipCode: zipCode(),
         status: form.status,
+        // `null`, not `undefined`: emptying the field clears the limit.
+        traineeSlots: form.traineeSlots ? Number(form.traineeSlots) : null,
         coordinatorFirstName: form.coordinatorFirstName || undefined,
         coordinatorLastName: form.coordinatorLastName || undefined,
         coordinatorMiddleInitial: form.coordinatorMiddleInitial || undefined,
@@ -210,6 +217,7 @@ export function useEstablishment() {
       province: establishment.province || "",
       zipCode: establishment.zipCode || "",
       status: establishment.status || "ACTIVE",
+      traineeSlots: establishment.traineeSlots?.toString() ?? "",
       coordinatorFirstName: establishment.coordinatorFirstName || "",
       coordinatorLastName: establishment.coordinatorLastName || "",
       coordinatorMiddleInitial: establishment.coordinatorMiddleInitial || "",

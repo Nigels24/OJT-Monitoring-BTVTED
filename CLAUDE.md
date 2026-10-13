@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — fifteen spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — nineteen spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -49,7 +49,7 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it. `ReportModule` (§19) is in `AppModule` and is read-only.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -250,6 +250,21 @@ The student record holds only what OJT monitoring needs. Three rules, each with 
 **Postal codes** are static data keyed by PSGC city/municipality code — the package has none. `app/client/lib/address/postal-codes.*.json` with **`SOURCES.md` beside them stating coverage and provenance**; the server's copy is `src/common/postal-codes.data.ts` and `postal-codes.spec.ts` fails if the two differ. Where a city has a known code the picker fills it in and locks it, and the server rejects a different one; where none is known the field is typed (any 4 digits). Never add a code that is not sourced — an unmapped place is a supported state, a wrong code is not. Region IX is *not* from PHLPost (its page omits the region) but from cross-checked secondary sources; see `SOURCES.md`.
 
 The deprecated assignment mirrors on `Student` (§10) are untouched by this.
+
+### 19. Printable reports, student filters, establishment slots, and automatic completion
+
+**Reports** (`src/report/`) are read-only and live on one bare `/reports` controller with no class-level `@Roles` — the same deliberate exception as `/messages` (§5). `ReportService.resolvePlacement` is the single access decision for every placement report: a student reads their own placements (and may omit `assignmentId` to get the current one), a supervisor those whose *assignment* is at their establishment (§2), a coordinator any. `GET /reports/summary` alone is `@Roles('COORDINATOR')`. Every figure comes from the helper that already owns it, so a report cannot disagree with its screen; a new report should do the same rather than re-derive.
+
+- **DTR (CS Form 48)** — `common/dtr.ts` `buildDtrMonth(month, rows, dutyDays)` builds the calendar month from **APPROVED entries only** and applies that rule itself (it does not trust the caller's `where`). Clock times are formatted server-side in Asia/Manila (`formatClock`). The printed sheet is **one copy on one portrait A4 page**, always 31 rows; undertime is on the form and deliberately blank. The form's "official hours" blanks carry the placement's duty days — a placement stores no office hours.
+- **Attendance summary** — `common/attendance-summary.ts` is the one place "Missing Log" (a duty day inside the placement, not in the future, with no entry) and "Not a Duty Day" are decided. Neither is stored.
+- **Compiled journal** lists `ACCEPTED` entries only and never selects `coordinatorRemarks` (§12). The **assessment record** lists the supervisor's totals and the coordinator's grade side by side, never combined (§13), and nulls the grade remarks for a supervisor.
+- Client: one dynamic route per role, `app/<role>/reports/[kind]/page.tsx` → `features/reports/components/ReportRoute.tsx`, on the shared `PrintPage` shell. The role prefix exists only because `proxy.ts` routes on it. `ReportLinks` is the "Print DTR" month picker plus the other links.
+
+**Student filters.** `common/student-filters.ts` `buildStudentWhere(filters, blockScopeIds)` is the one query builder for the coordinator's Students list *and* the summary report, so the summary's counts are the list's counts; `StudentFiltersQueryDto` validates the query string for both, and `resolveBlockScope` (`common/coordinator-scope.ts`) resolves "My Block". Training status is derived from a student's placements by `trainingStatusOf` (`ACTIVE` > `COMPLETED` > `ENDED` = has placements but neither > `NONE`); it is not `Student.status`. Client-side every filter lives in the URL (`useRosterUrlState`), written with **one** `router.replace` per change (`setParams`) — several in a row each start from the same stale query string and only the last survives.
+
+**Establishment slots.** `Establishment.traineeSlots` is nullable (`null` = no limit) and is compared against ACTIVE assignments there, never `Student.establishmentId`. A full establishment is a **warning, not a block**: `createPlacement` answers 409 `{ code: 'ESTABLISHMENT_FULL' }` unless the body carries `confirmFull: true`, so the confirmation is enforced server-side and not only by the dialog.
+
+**Automatic completion.** `common/assignment-completion.ts` is the only definition: approved hours ≥ required, the `PORTFOLIO` document `APPROVED` for that assignment, a supervisor evaluation exists, and a coordinator grade is recorded. `syncAssignmentCompletion(client, assignmentId)` is called wherever one of those inputs changes (attendance approval, document review/coordinator upload, evaluation creation, grade save) — add the call when adding another such path. It only ever moves `ACTIVE → COMPLETED` (a conditional `updateMany`), so a manual `CANCELLED`/`TRANSFERRED`/`COMPLETED` is never reversed or overwritten, and callers wrap it so a failure never fails the action that triggered it. The checklist the UI shows is `loadCompletionChecklist`, the same function.
 
 ### Client
 

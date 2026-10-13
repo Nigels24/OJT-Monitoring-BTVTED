@@ -1,3 +1,4 @@
+import { slotsLabel } from "@/lib/format";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
@@ -96,6 +97,26 @@ export default function EstablishmentList({
       key: "students",
       label: "Students",
       render: (r) => r._count?.students ?? 0,
+    },
+    {
+      key: "slots",
+      label: "Slots",
+      render: (r) => {
+        const active = r.activeTrainees ?? 0;
+        const full =
+          r.traineeSlots !== null &&
+          r.traineeSlots !== undefined &&
+          active >= r.traineeSlots;
+        return (
+          <span
+            className={`whitespace-nowrap text-xs ${
+              full ? "font-semibold text-amber-700" : "text-gray-700"
+            }`}
+          >
+            {slotsLabel(active, r.traineeSlots)}
+          </span>
+        );
+      },
     },
     {
       key: "status",

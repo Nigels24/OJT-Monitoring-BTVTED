@@ -1,5 +1,7 @@
 "use client";
 
+import ReportLinks from "@/features/reports/components/ReportLinks";
+import { Printer } from "lucide-react";
 import Sidebar from "@/components/layout/Sidebar";
 import PageHeader from "@/components/ui/PageHeader";
 import Card from "@/components/ui/Card";
@@ -96,6 +98,17 @@ export default function StudentAttendancePage() {
             icon={XCircle}
           />
         </div>
+
+        <Card className="mb-4">
+          <h2 className="text-base font-semibold text-gray-800 mb-1 flex items-center gap-2">
+            <Printer size={18} className="text-blue-600" />
+            Printable Records
+          </h2>
+          <p className="text-xs text-gray-500 mb-3">
+            The daily time record (CS Form 48) shows approved attendance only.
+          </p>
+          <ReportLinks basePath="/student/reports" />
+        </Card>
 
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
           <Card className="xl:col-span-2 h-fit">

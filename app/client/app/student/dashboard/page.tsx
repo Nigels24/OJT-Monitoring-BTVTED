@@ -23,6 +23,7 @@ import {
 import { useGetMyDashboardQuery } from "@/lib/api/studentPortalApi";
 import { STUDENT_NAV } from "@/features/student-portal/nav";
 import AttendanceTable from "@/features/student-portal/components/AttendanceTable";
+import CompletionChecklist from "@/features/reports/components/CompletionChecklist";
 import AssessmentCard from "@/features/student-portal/components/AssessmentCard";
 import AnnouncementsCard from "@/features/announcements/components/AnnouncementsCard";
 
@@ -110,6 +111,23 @@ export default function StudentDashboardPage() {
             <AnnouncementsCard />
 
             <AssessmentCard assessment={data.assessment} />
+
+            {data.completion && (
+              <Card className="mb-4">
+                <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                  <CheckCircle2 size={18} className="text-blue-600" />
+                  Training Completion
+                </h2>
+                <CompletionChecklist
+                  checklist={data.completion}
+                  status={data.completion.status}
+                />
+                <p className="text-xs text-gray-500 mt-3">
+                  Your training is marked Completed automatically once all four
+                  are met.
+                </p>
+              </Card>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
               <Card className="lg:col-span-1">

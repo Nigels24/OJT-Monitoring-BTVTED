@@ -67,6 +67,14 @@ export interface TrainingAssignment {
   grading: { eligible: boolean; reason: string | null };
   /** The supervisor's sheets for this placement, newest first — totals only. */
   evaluations: AssignmentEvaluationSummary[];
+  /** The four conditions of completion, evaluated by the server. */
+  completion: {
+    hoursMet: boolean;
+    portfolioAccepted: boolean;
+    evaluationRecorded: boolean;
+    gradeRecorded: boolean;
+    complete: boolean;
+  };
 }
 
 /** One supervisor evaluation sheet, as much as an assignment row needs of it. */
@@ -92,7 +100,15 @@ export interface PlacementDefaults {
   yearLevel: number;
   requirement: { id: string; yearLevel: number; requiredHours: number };
   requiredHours: number;
-  establishment: { id: string; name: string; status: string } | null;
+  establishment: {
+    id: string;
+    name: string;
+    status: string;
+    /** `null` when the establishment has no limit recorded. */
+    traineeSlots: number | null;
+    /** Students with an ACTIVE placement there now. */
+    activeTrainees: number;
+  } | null;
 }
 
 export interface CreatePlacementRequest {
@@ -103,6 +119,11 @@ export interface CreatePlacementRequest {
   /** Overrides the requirement's hours; omit to use the auto-filled default. */
   requiredHours?: number;
   blockId?: string;
+  /**
+   * Required to place a student into an establishment whose slots are all
+   * used — the server answers 409 `ESTABLISHMENT_FULL` without it.
+   */
+  confirmFull?: boolean;
 }
 
 export interface UpdateAssignmentRequest {
@@ -119,6 +140,12 @@ export interface ListStudentsParams {
   yearLevel?: number;
   blockId?: string;
   academicYear?: string;
+  /** An inclusive range of academic years, e.g. "2024-2025" to "2026-2027". */
+  academicYearFrom?: string;
+  academicYearTo?: string;
+  /** Students who have, or have had, a placement there. */
+  establishmentId?: string;
+  trainingStatus?: "ACTIVE" | "COMPLETED" | "ENDED" | "NONE";
   status?: StudentStatus;
 }
 
@@ -148,6 +175,11 @@ function toQueryString(
  */
 export interface Student {
   id: string;
+  /**
+   * Where the student's training stands, from their placements: ENDED means
+   * they have placements but none is active or completed.
+   */
+  trainingStatus?: "ACTIVE" | "COMPLETED" | "ENDED" | "NONE";
   userId: string;
   studentIdNumber: string;
   username?: string | null;

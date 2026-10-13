@@ -28,6 +28,7 @@ import { buildObjectPath, deleteFile, uploadFile } from '../common/storage';
 import { extensionOf, withSignedUrl } from '../common/signed-url';
 import { GRADED_BY_SELECT } from '../common/assignment-grade';
 import { withAge } from '../common/age';
+import { loadCompletionChecklist } from '../common/assignment-completion';
 import { assertValidAddress } from '../common/ph-address';
 import {
   EVALUATION_INCLUDE,
@@ -144,10 +145,11 @@ export class StudentService {
         // assignment only, per-assignment, the same as every other progress
         // figure in the app now is.
         attendances: { orderBy: { date: 'desc' } },
+        // Every placement, newest first: the ACTIVE one drives the hour
+        // figures, and the newest one the completion checklist.
         trainingAssignments: {
-          where: { status: 'ACTIVE' },
-          take: 1,
-          select: { id: true },
+          orderBy: { startDate: 'desc' },
+          select: { id: true, status: true },
         },
         _count: { select: { documents: true, credentials: true } },
       },
@@ -157,7 +159,12 @@ export class StudentService {
     }
 
     const { attendances, trainingAssignments, ...profile } = student;
-    const activeAssignment = trainingAssignments[0] ?? null;
+    const activeAssignment =
+      trainingAssignments.find((a) => a.status === 'ACTIVE') ?? null;
+    // What the checklist is about: the placement in progress, or — once it
+    // has closed — the most recent one.
+    const currentAssignment =
+      activeAssignment ?? trainingAssignments[0] ?? null;
     // Zeroed, with the flag below, rather than crashing — a student between
     // placements (or never yet placed) still has a dashboard to load.
     const progress = activeAssignment
@@ -167,6 +174,18 @@ export class StudentService {
     return {
       ...withAge(profile),
       assessment: await this.getAssessment(student.id),
+      // The four conditions for the placement to be completed, each on its
+      // own (common/assignment-completion.ts). `null` when never placed.
+      completion: currentAssignment
+        ? {
+            assignmentId: currentAssignment.id,
+            status: currentAssignment.status,
+            ...(await loadCompletionChecklist(
+              this.prisma.client,
+              currentAssignment.id,
+            )),
+          }
+        : null,
       stats: {
         hasActiveAssignment: activeAssignment !== null,
         completedHours: progress.approvedHours,

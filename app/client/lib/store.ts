@@ -18,6 +18,7 @@ import { journalApi } from "./api/journalApi";
 import { weeklyTaskApi } from "./api/weeklyTaskApi";
 import { concernApi } from "./api/concernApi";
 import { announcementApi } from "./api/announcementApi";
+import { reportApi } from "./api/reportApi";
 
 export const store = configureStore({
   reducer: {
@@ -40,6 +41,7 @@ export const store = configureStore({
     [weeklyTaskApi.reducerPath]: weeklyTaskApi.reducer,
     [concernApi.reducerPath]: concernApi.reducer,
     [announcementApi.reducerPath]: announcementApi.reducer,
+    [reportApi.reducerPath]: reportApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
@@ -71,7 +73,8 @@ export const store = configureStore({
       journalApi.middleware,
       weeklyTaskApi.middleware,
       concernApi.middleware,
-      announcementApi.middleware
+      announcementApi.middleware,
+      reportApi.middleware
     ),
 });
 

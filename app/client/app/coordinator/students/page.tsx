@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import Sidebar from "@/components/layout/Sidebar";
 import { COORDINATOR_NAV } from "@/features/coordinator/nav";
 import PageHeader from "@/components/ui/PageHeader";
@@ -17,6 +18,7 @@ import {
   CheckCircle2,
   Clock,
   UserCheck,
+  Printer,
 } from "lucide-react";
 import { useStudents } from "@/features/student/hooks/use-students";
 import type { Student } from "@/lib/api/studentApi";
@@ -162,6 +164,11 @@ function StudentManagementPageContent() {
             yearLevel={roster.yearLevel}
             blockId={roster.blockId}
             academicYear={roster.academicYear}
+            academicYearFrom={roster.academicYearFrom}
+            academicYearTo={roster.academicYearTo}
+            establishmentId={roster.establishmentId}
+            trainingStatus={roster.trainingStatus}
+            establishments={establishments ?? []}
             status={roster.status}
             courses={courses}
             filterBlocks={filterBlocks}
@@ -171,8 +178,23 @@ function StudentManagementPageContent() {
             onYearLevelChange={roster.setYearLevel}
             onBlockChange={roster.setBlockId}
             onAcademicYearChange={roster.setAcademicYear}
+            onAcademicYearFromChange={roster.setAcademicYearFrom}
+            onAcademicYearToChange={roster.setAcademicYearTo}
+            onEstablishmentChange={roster.setEstablishmentId}
+            onTrainingStatusChange={roster.setTrainingStatus}
             onStatusChange={roster.setStatus}
           />
+          <div className="mb-4 -mt-1">
+            <Link
+              href={`/coordinator/reports/summary${
+                roster.queryString ? `?${roster.queryString}` : ""
+              }`}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline"
+            >
+              <Printer size={14} />
+              Print program / block summary for these filters
+            </Link>
+          </div>
           <StudentList
             isLoading={isLoading}
             search={search}

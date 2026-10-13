@@ -12,6 +12,8 @@ import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import CoordinatorGradeCard from "./CoordinatorGradeCard";
 import PlacementWeeklyTasks from "@/features/weekly-tasks/components/PlacementWeeklyTasks";
 import PlacementConcerns from "@/features/concerns/components/PlacementConcerns";
+import CompletionChecklist from "@/features/reports/components/CompletionChecklist";
+import ReportLinks from "@/features/reports/components/ReportLinks";
 
 const STATUS_VARIANT: Record<AssignmentStatus, BadgeVariant> = {
   ACTIVE: "active",
@@ -199,6 +201,17 @@ export default function TrainingAssignmentsPanel({
               </button>
             </div>
           )}
+
+          <CompletionChecklist
+            checklist={a.completion}
+            status={a.status}
+            className="mt-3 pt-3 border-t border-gray-100"
+          />
+          <ReportLinks
+            basePath="/coordinator/reports"
+            assignmentId={a.id}
+            className="mt-3 pt-3 border-t border-gray-100"
+          />
 
           <CoordinatorGradeCard assignment={a} />
           <PlacementWeeklyTasks assignmentId={a.id} />

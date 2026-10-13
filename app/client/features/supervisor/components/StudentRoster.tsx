@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/supervisorApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import { formatGrade } from "@/lib/format";
+import ReportLinks from "@/features/reports/components/ReportLinks";
 
 interface StudentRosterProps {
   students: SupervisorStudent[];
@@ -140,6 +141,18 @@ export default function StudentRoster({
                 ? "completed"
                 : "neutral"
           }
+        />
+      ),
+    },
+    {
+      // The trainee's months at THIS establishment — the row's own assignment.
+      key: "dtr",
+      label: "Daily Time Record",
+      render: (r) => (
+        <ReportLinks
+          basePath="/supervisor/reports"
+          assignmentId={r.assignmentId}
+          compact
         />
       ),
     },

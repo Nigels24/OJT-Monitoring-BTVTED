@@ -65,6 +65,19 @@ export interface StudentDashboard {
     grades: CoordinatorGradeRecord[];
     evaluations: MyEvaluationSummary[];
   };
+  /**
+   * What the current (or most recent) placement still needs before it is
+   * complete; `null` when the student has never been placed.
+   */
+  completion: {
+    assignmentId: string;
+    status: string;
+    hoursMet: boolean;
+    portfolioAccepted: boolean;
+    evaluationRecorded: boolean;
+    gradeRecorded: boolean;
+    complete: boolean;
+  } | null;
   _count: { documents: number; credentials: number };
 }
 

@@ -8,11 +8,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import type {
-  Prisma,
-  StudentStatus,
-  Weekday,
-} from '../../generated/prisma/client';
+import type { Prisma, Weekday } from '../../generated/prisma/client';
 import { totalHours } from '../common/attendance-hours';
 import {
   MS_PER_DAY,
@@ -42,6 +38,16 @@ import {
 } from '../common/cascade-delete';
 import { deleteFile } from '../common/storage';
 import { withAge } from '../common/age';
+import {
+  StudentFilters,
+  buildStudentWhere,
+  trainingStatusOf,
+} from '../common/student-filters';
+import { resolveBlockScope } from '../common/coordinator-scope';
+import {
+  loadCompletionChecklist,
+  syncAssignmentCompletion,
+} from '../common/assignment-completion';
 import { formatFullName } from '../common/person-name';
 import { assertValidAddress } from '../common/ph-address';
 import { generateTemporaryPassword } from '../common/temp-password';
@@ -597,47 +603,16 @@ export class CoordinatorService {
    */
   async listStudents(
     userId: string,
-    filters: {
-      scope?: 'block' | 'all';
-      courseId?: string;
-      yearLevel?: number;
-      blockId?: string;
-      academicYear?: string;
-      status?: StudentStatus;
-    } = {},
+    filters: StudentFilters & { scope?: 'block' | 'all' } = {},
   ) {
-    const coordinator = await this.getCoordinatorByUserId(userId);
-
-    let blockScopeIds: string[] | null = null;
-    let noBlocksAssigned = false;
-    if (filters.scope !== 'all') {
-      const ownBlocks = await this.prisma.client.block.findMany({
-        where: { coordinatorId: coordinator.id },
-        select: { id: true },
-      });
-      if (ownBlocks.length > 0) {
-        blockScopeIds = ownBlocks.map((b) => b.id);
-      } else {
-        noBlocksAssigned = true;
-      }
-    }
-
-    const where: Prisma.StudentWhereInput = {
-      ...(blockScopeIds ? { blockId: { in: blockScopeIds } } : {}),
-      ...(filters.courseId ? { courseId: filters.courseId } : {}),
-      ...(filters.blockId ? { blockId: filters.blockId } : {}),
-      ...(filters.status ? { status: filters.status } : {}),
-      // yearLevel now matches Student.courseYearLevel directly, so a student
-      // not yet assigned to a block can still match. academicYear has no
-      // Student-level counterpart — it only lives on Block — so it still
-      // narrows through that relation.
-      ...(filters.yearLevel !== undefined
-        ? { courseYearLevel: filters.yearLevel }
-        : {}),
-      ...(filters.academicYear
-        ? { block: { academicYear: filters.academicYear } }
-        : {}),
-    };
+    const { blockScopeIds, noBlocksAssigned } = await resolveBlockScope(
+      this.prisma.client,
+      userId,
+      filters.scope,
+    );
+    // The one query builder the summary report filters through as well, so
+    // its counts match this list (common/student-filters.ts).
+    const where = buildStudentWhere(filters, blockScopeIds);
 
     const students = await this.prisma.client.student.findMany({
       where,
@@ -647,11 +622,14 @@ export class CoordinatorService {
         // At most one ACTIVE row per student — nothing enforces that in the
         // schema, but `createPlacement` always transfers the prior one out
         // before creating the next, so there is only ever one to `take`.
+        // Every placement's status (for the training-status label) with the
+        // fields progress needs. At most one is ACTIVE — nothing enforces
+        // that in the schema, but `createPlacement` always transfers the
+        // prior one out before creating the next.
         trainingAssignments: {
-          where: { status: 'ACTIVE' },
-          take: 1,
           select: {
             id: true,
+            status: true,
             requiredHours: true,
             dutyDays: true,
             startDate: true,
@@ -670,8 +648,10 @@ export class CoordinatorService {
       orderBy: { user: { createdAt: 'desc' } },
     });
 
+    const activeOf = (student: (typeof students)[number]) =>
+      student.trainingAssignments.find((a) => a.status === 'ACTIVE') ?? null;
     const progressByStudent = await this.batchAssignmentProgress(
-      students.map((s) => s.trainingAssignments[0] ?? null),
+      students.map(activeOf),
     );
 
     // `trainingAssignments` is only fetched to derive progress; drop it from
@@ -682,7 +662,14 @@ export class CoordinatorService {
         const progress = progressByStudent[index];
         return {
           ...withAge(student),
-          hasActiveAssignment: trainingAssignments.length > 0,
+          hasActiveAssignment: trainingAssignments.some(
+            (a) => a.status === 'ACTIVE',
+          ),
+          // Active / Completed / Ended / No placement — the same
+          // classification the trainingStatus filter uses.
+          trainingStatus: trainingStatusOf(
+            trainingAssignments.map((a) => a.status),
+          ),
           // Kept at top level, not just inside `progress`, so the existing
           // client types (studentApi.ts) that already read these two fields
           // keep compiling unchanged — their values now come from the ACTIVE
@@ -1596,15 +1583,30 @@ export class CoordinatorService {
       id: string;
       name: string;
       status: string;
+      traineeSlots: number | null;
+      activeTrainees: number;
     } | null = null;
     if (establishmentId) {
-      establishment = await this.prisma.client.establishment.findUnique({
+      const found = await this.prisma.client.establishment.findUnique({
         where: { id: establishmentId },
-        select: { id: true, name: true, status: true },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          traineeSlots: true,
+        },
       });
-      if (!establishment) {
+      if (!found) {
         throw new NotFoundException('Establishment not found');
       }
+      // Slots used = placements in progress there, so the dialog can warn
+      // before a placement into a full establishment (CLAUDE.md §19).
+      establishment = {
+        ...found,
+        activeTrainees: await this.prisma.client.trainingAssignment.count({
+          where: { establishmentId, status: 'ACTIVE' },
+        }),
+      };
     }
 
     return {
@@ -1637,6 +1639,7 @@ export class CoordinatorService {
       academicYear: string;
       requiredHours?: number;
       blockId?: string;
+      confirmFull?: boolean;
     },
   ) {
     const student = await this.prisma.client.student.findUnique({
@@ -1648,7 +1651,7 @@ export class CoordinatorService {
 
     const establishment = await this.prisma.client.establishment.findUnique({
       where: { id: data.establishmentId },
-      select: { id: true, status: true },
+      select: { id: true, name: true, status: true, traineeSlots: true },
     });
     if (!establishment) {
       throw new NotFoundException('Establishment not found');
@@ -1657,6 +1660,26 @@ export class CoordinatorService {
       throw new BadRequestException(
         'This establishment is inactive and cannot receive new placements.',
       );
+    }
+
+    // Trainee slots: a full establishment is a warning to confirm, not a
+    // wall — the coordinator may know something the number does not. The
+    // student's own placement there (a re-placement at the same
+    // establishment) is not counted against it, since it is being replaced.
+    if (establishment.traineeSlots !== null && !data.confirmFull) {
+      const activeTrainees = await this.prisma.client.trainingAssignment.count({
+        where: {
+          establishmentId: data.establishmentId,
+          status: 'ACTIVE',
+          studentId: { not: studentId },
+        },
+      });
+      if (activeTrainees >= establishment.traineeSlots) {
+        throw new ConflictException({
+          code: 'ESTABLISHMENT_FULL',
+          message: `${establishment.name} already has ${activeTrainees} of ${establishment.traineeSlots} trainee slots filled. Confirm to place this student there anyway.`,
+        });
+      }
     }
 
     if (data.blockId) {
@@ -1842,6 +1865,12 @@ export class CoordinatorService {
           ...assignment,
           progress,
           grading: gradeEligibility(assignment, progress),
+          // The four conditions for completion, each on its own, for the
+          // checklist (common/assignment-completion.ts).
+          completion: await loadCompletionChecklist(
+            this.prisma.client,
+            assignment.id,
+          ),
         };
       }),
     );
@@ -1944,7 +1973,27 @@ export class CoordinatorService {
       return saved;
     });
 
+    // The grade is one of the four completion conditions.
+    await this.syncCompletion(assignmentId);
+
     return { ...updated, progress, grading };
+  }
+
+  /**
+   * Re-checks whether an assignment is now complete, after a write that could
+   * make it so. Never throws: the write it follows has already succeeded and
+   * must not be reported as failed because this could not run — the next
+   * qualifying write, or a manual "Mark Completed", catches it up.
+   */
+  private async syncCompletion(assignmentId: string) {
+    try {
+      await syncAssignmentCompletion(this.prisma.client, assignmentId);
+    } catch (err) {
+      this.logger.error(
+        `Completion check for assignment ${assignmentId} failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   /**

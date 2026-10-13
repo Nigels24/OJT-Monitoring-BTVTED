@@ -1,4 +1,5 @@
 import { Building2, MapPin, User, Phone, Mail, CalendarCheck, Users } from "lucide-react";
+import { slotsLabel } from "@/lib/format";
 import ViewDialog from "@/components/ui/ViewDialog";
 import DetailItem from "@/components/ui/DetailItem";
 import { Establishment } from "@/lib/api/establishmentApi";
@@ -125,6 +126,14 @@ export default function EstablishmentViewDialog({
             <DetailItem
               label="Supervisors"
               value={establishment._count?.supervisors ?? 0}
+              icon={Users}
+            />
+            <DetailItem
+              label="Trainee Slots"
+              value={slotsLabel(
+                establishment.activeTrainees ?? 0,
+                establishment.traineeSlots,
+              )}
               icon={Users}
             />
           </div>

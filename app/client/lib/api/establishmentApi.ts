@@ -28,6 +28,10 @@ export interface Establishment {
   coordinatorAddress?: string | null;
   coordinatorContact?: string | null;
   coordinatorEmail?: string | null;
+  /** How many trainees it can take at once; `null` = no limit recorded. */
+  traineeSlots?: number | null;
+  /** Students with an ACTIVE placement there now. */
+  activeTrainees?: number;
   createdAt: string;
   _count?: {
     students: number;
@@ -45,6 +49,8 @@ export interface CreateEstablishmentRequest {
   province?: string;
   zipCode?: string;
   status?: "ACTIVE" | "INACTIVE";
+  /** `null` clears the limit. */
+  traineeSlots?: number | null;
   coordinatorFirstName?: string;
   coordinatorLastName?: string;
   coordinatorMiddleInitial?: string;

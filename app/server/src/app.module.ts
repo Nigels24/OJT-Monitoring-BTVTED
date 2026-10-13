@@ -21,6 +21,7 @@ import { WeeklyTaskModule } from './weekly-task/weekly-task.module';
 import { ConcernModule } from './concern/concern.module';
 import { AnnouncementModule } from './announcement/announcement.module';
 import { StudentImportModule } from './student-import/student-import.module';
+import { ReportModule } from './report/report.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { StudentImportModule } from './student-import/student-import.module';
     ConcernModule,
     AnnouncementModule,
     StudentImportModule,
+    ReportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -18,6 +18,7 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEmail,
   IsIn,
@@ -36,6 +37,7 @@ import { CoordinatorService } from './coordinator.service';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { AuthedRequest } from '../auth/authed-request';
 import { GRADE_MAX, GRADE_MIN } from '../common/assignment-grade';
+import { StudentFiltersQueryDto } from '../common/student-filters.dto';
 import {
   EmptyToNull,
   EmptyToUndefined,
@@ -317,44 +319,13 @@ class CreatePlacementDto {
   @IsString()
   @IsNotEmpty()
   blockId?: string;
-}
 
-/**
- * `scope=block` (the default) narrows the roster to the requesting
- * coordinator's own blocks — a view default, not an authorization boundary
- * (Table 1: "own block, all on request"). The other filters narrow further,
- * on top of whichever scope applies.
- */
-class ListStudentsQueryDto {
+  // Required only when the establishment is already at its trainee-slot
+  // limit: the placement is allowed, but not by accident. Without it the
+  // server answers 409 with `code: "ESTABLISHMENT_FULL"`.
   @IsOptional()
-  @EmptyToUndefined()
-  @IsIn(['block', 'all'])
-  scope?: 'block' | 'all';
-
-  @IsOptional()
-  @EmptyToUndefined()
-  @IsString()
-  courseId?: string;
-
-  @IsOptional()
-  @ToOptionalNumber()
-  @IsInt()
-  yearLevel?: number;
-
-  @IsOptional()
-  @EmptyToUndefined()
-  @IsString()
-  blockId?: string;
-
-  @IsOptional()
-  @EmptyToUndefined()
-  @Matches(ACADEMIC_YEAR_PATTERN, { message: ACADEMIC_YEAR_MESSAGE })
-  academicYear?: string;
-
-  @IsOptional()
-  @EmptyToUndefined()
-  @IsIn(['ACTIVE', 'PENDING', 'COMPLETED', 'INACTIVE'])
-  status?: 'ACTIVE' | 'PENDING' | 'COMPLETED' | 'INACTIVE';
+  @IsBoolean()
+  confirmFull?: boolean;
 }
 
 class UpdateAssignmentDto {
@@ -423,7 +394,7 @@ export class CoordinatorController {
   @Get('students')
   listStudents(
     @Req() req: AuthedRequest,
-    @Query() query: ListStudentsQueryDto,
+    @Query() query: StudentFiltersQueryDto,
   ) {
     return this.coordinatorService.listStudents(req.user.userId, query);
   }

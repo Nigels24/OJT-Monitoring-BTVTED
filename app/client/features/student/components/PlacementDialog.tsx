@@ -5,6 +5,7 @@ import SelectField from "@/components/ui/SelectField";
 import TextField from "@/components/ui/TextField";
 import Button from "@/components/ui/Button";
 import { Student } from "@/lib/api/studentApi";
+import { slotsLabel } from "@/lib/format";
 import { DUTY_DAY_OPTIONS, usePlacement } from "../hooks/use-placement";
 
 const DAY_LABEL: Record<string, string> = {
@@ -47,6 +48,10 @@ export default function PlacementDialog({
     activeAssignment,
     confirmed,
     setConfirmed,
+    slots,
+    isFull,
+    confirmedFull,
+    setConfirmedFull,
     canSubmit,
     isSubmitting,
     error,
@@ -110,6 +115,15 @@ export default function PlacementDialog({
               }))}
               className="w-full"
             />
+            {slots && (
+              <p
+                className={`text-xs mt-1.5 ${
+                  isFull ? "font-semibold text-amber-700" : "text-gray-500"
+                }`}
+              >
+                {slotsLabel(slots.activeTrainees, slots.traineeSlots)}
+              </p>
+            )}
           </div>
 
           <div>
@@ -227,6 +241,32 @@ export default function PlacementDialog({
               I understand this transfers the current placement and starts
               new hours at 0.
             </label>
+          )}
+
+          {isFull && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 space-y-2">
+              <p className="flex gap-2">
+                <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                <span>
+                  This establishment has no trainee slots left
+                  {slots?.traineeSlots != null
+                    ? ` — ${slots.activeTrainees} of ${slots.traineeSlots} used`
+                    : ""}
+                  . You can still record the placement.
+                </span>
+              </p>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={confirmedFull}
+                  onChange={(e) => {
+                    setConfirmedFull(e.target.checked);
+                  }}
+                  className="mt-0.5"
+                />
+                Place this student here anyway, over the slot limit.
+              </label>
+            </div>
           )}
 
           {error && (
