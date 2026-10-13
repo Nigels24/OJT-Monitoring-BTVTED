@@ -20,6 +20,7 @@ import { DocumentModule } from './document/document.module';
 import { WeeklyTaskModule } from './weekly-task/weekly-task.module';
 import { ConcernModule } from './concern/concern.module';
 import { AnnouncementModule } from './announcement/announcement.module';
+import { StudentImportModule } from './student-import/student-import.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AnnouncementModule } from './announcement/announcement.module';
     WeeklyTaskModule,
     ConcernModule,
     AnnouncementModule,
+    StudentImportModule,
   ],
   controllers: [AppController],
   providers: [AppService],

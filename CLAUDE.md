@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — eight spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — eleven spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -49,7 +49,7 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16).
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -219,6 +219,23 @@ A new student or supervisor account's temporary password is emailed to the user 
 - A coordinator-typed password on create is emailed like a generated one, but is never echoed back in the response.
 
 Client: `lib/api/credentialsEmail.ts` (shared shapes), `components/ui/LoginEmailBadge.tsx` (the "Login email" column), `features/account/components/ResendLoginDialog.tsx` (one dialog for both roles). `CredentialsDialog` is now only the fallback for an unsent email and shows the reason.
+
+### 17. Batch student import from Excel
+
+The coordinator downloads a template, fills one row per student, uploads it, reads a preview, and confirms. `src/student-import/` is three layers, and only the last one touches the database:
+
+- `student-import.rules.ts` — pure: the column list, header matching (by normalised *name*, never position), every normaliser, and `validateRows`, which returns each row with **all** its reasons. Unit-tested exhaustively; add a new rejection reason here and in its spec.
+- `student-import.workbook.ts` — the only file that knows exceljs: `readStudentRows` (file-level refusals are 400s: not a zip, over 2MB, no `Students` sheet, a missing column, over 500 rows) and `buildTemplate` (dropdowns read from a hidden `Lists` sheet because inline lists cap at 255 characters).
+- `StudentImportService` — `preview` and `commit` both call `analyse` (read file → three bulk reads → `validateRows`). **Preview writes nothing.** Commit re-runs the whole analysis on the re-uploaded file — the preview's verdicts are never sent back or trusted.
+
+**An imported student is a single-added student.** Both go through `CoordinatorService.prepareStudentAccount` (name, `resolveCourseFields`, generated temporary password + hash) and `createStudentAccounts` (`createManyAndReturn` + `createMany` — two statements for any number of rows, which is what lets 500 fit in one transaction; single-add passes an array of one). `resolveCourseFields` takes a `CourseLookup`: the database for one student, an in-memory copy of the already-loaded courses for an import. Don't add a second create path. The one difference: the template has no username column, so imported accounts have `username: null` and sign in with their email.
+
+- Commit is all-or-nothing for the valid rows: if the insert fails (a concurrent add) the transaction rolls back and it answers 409.
+- **Logins (§16):** with mail configured the emails are queued *after* the commit and not awaited (`queueStudentCredentials` → `CredentialsEmailService.deliverBatch`), each outcome written to its user row as it is sent; no password is in the response. With mail off, every created account is marked `NOT_CONFIGURED` and the response carries each login ID and one-time password, once.
+- Middle Name → `middleInitialFrom` (the single place for that mapping); Sex → `Student.gender`; age is computed from Birthdate, never read from the file; Course matches an **active** course by code or name; Year Level must have a `CourseRequirement` for that course, as single-add requires. An optional `blockId` applies to every row and rejects rows whose course/year it does not match.
+- The audit log line carries the coordinator id and counts only. Never log row contents — an insert error can quote the conflicting value, so only its name is logged.
+
+Client: `features/student-import/` (hook + dialog), endpoints on `studentApi`. The template download is turned into an object URL inside the endpoint so no Blob enters the store; the rejected-rows CSV is built client-side.
 
 ### Client
 

@@ -10,5 +10,7 @@ import { MailModule } from '../mail/mail.module';
   imports: [PrismaModule, NotificationModule, MessagesModule, MailModule],
   controllers: [CoordinatorController],
   providers: [CoordinatorService],
+  // StudentImportModule creates students through the same code single-add uses.
+  exports: [CoordinatorService],
 })
 export class CoordinatorModule {}

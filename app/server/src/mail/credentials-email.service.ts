@@ -49,6 +49,33 @@ export class CredentialsEmailService {
 
     return result;
   }
+
+  /**
+   * Emails many accounts their logins through the shared queue and records
+   * each outcome on its user row as that email finishes, so the coordinator's
+   * "Login email" column fills in while a large batch is still going out.
+   *
+   * Takes minutes for hundreds of accounts (one email a second), so callers
+   * start it and do not wait — see `CoordinatorService.queueStudentCredentials`.
+   */
+  deliverBatch(inputs: readonly DeliverCredentialsInput[]) {
+    return this.mail.sendLoginCredentialsBatch(
+      inputs.map((input) => ({
+        to: input.email,
+        name: input.name,
+        role: input.role,
+        loginId: input.username ?? input.email,
+        temporaryPassword: input.temporaryPassword,
+        kind: input.kind,
+      })),
+      async (index, result) => {
+        await this.prisma.client.user.update({
+          where: { id: inputs[index].userId },
+          data: credentialsEmailColumns(result),
+        });
+      },
+    );
+  }
 }
 
 /**

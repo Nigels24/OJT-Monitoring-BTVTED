@@ -13,6 +13,7 @@ import { useCurrentUser } from "@/lib/hooks/use-current-user";
 import {
   Users,
   Plus,
+  FileSpreadsheet,
   CheckCircle2,
   Clock,
   UserCheck,
@@ -24,6 +25,7 @@ import StudentFilterBar from "@/features/student/components/StudentFilterBar";
 import StudentViewDialog from "@/features/student/components/StudentViewDialog";
 import StudentEditDialog from "@/features/student/components/StudentEditDialog";
 import ResendLoginDialog from "@/features/account/components/ResendLoginDialog";
+import StudentImportDialog from "@/features/student-import/components/StudentImportDialog";
 import PlacementDialog from "@/features/student/components/PlacementDialog";
 import { deleteStudentMessage } from "@/lib/format";
 
@@ -40,6 +42,7 @@ export default function StudentManagementPage() {
 function StudentManagementPageContent() {
   const currentUser = useCurrentUser();
   const [resetTarget, setResetTarget] = useState<Student | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [placementTarget, setPlacementTarget] = useState<Student | null>(null);
   const {
     form,
@@ -98,14 +101,27 @@ function StudentManagementPageContent() {
             subtitle="Manage OJT students, their assignments and progress"
             icon={Users}
           />
-          <Button
-            icon={Plus}
-            onClick={handleOpenAddDialog}
-            fullWidth={false}
-            className="self-start md:self-auto"
-          >
-            Add Student
-          </Button>
+          <div className="flex flex-wrap gap-2 self-start md:self-auto">
+            <Button
+              icon={FileSpreadsheet}
+              variant="secondary"
+              onClick={() => {
+                setImportOpen(true);
+              }}
+              fullWidth={false}
+              className="px-4"
+            >
+              Import from Excel
+            </Button>
+            <Button
+              icon={Plus}
+              onClick={handleOpenAddDialog}
+              fullWidth={false}
+              className="px-4"
+            >
+              Add Student
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
@@ -253,6 +269,13 @@ function StudentManagementPageContent() {
           onClose={closeCredentials}
         />
       )}
+
+      <StudentImportDialog
+        open={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+        }}
+      />
 
       <PlacementDialog
         student={placementTarget}

@@ -62,11 +62,13 @@ import {
  * `EmptyToNull`/`ToNullableNumber` transforms are what produce that split.
  * `requiredHours` and `status` are NOT NULL, so they stay undefined-only.
  */
-interface StudentDetails {
+export interface StudentDetails {
   name?: string;
   firstName?: string | null;
   lastName?: string | null;
   middleInitial?: string | null;
+  /** Not on the coordinator's form; set by the Excel import ("Sex"). */
+  gender?: string | null;
   age?: number | null;
   dateOfBirth?: string | null;
   school?: string | null;
@@ -81,6 +83,52 @@ interface StudentDetails {
   requiredHours?: number;
   startDate?: string | null;
   status?: 'ACTIVE' | 'PENDING' | 'COMPLETED' | 'INACTIVE';
+}
+
+/**
+ * Where `resolveCourseFields` looks a course, requirement or block up.
+ *
+ * Adding one student asks the database (`databaseCourseLookup`). The Excel
+ * import adds hundreds at once, so it loads those three small tables once and
+ * answers from memory — the *checks and the derived values are the same code*
+ * either way; only where the rows come from differs.
+ */
+export interface CourseLookup {
+  course(id: string): Promise<{ name: string } | null>;
+  hasRequirement(courseId: string, yearLevel: number): Promise<boolean>;
+  block(id: string): Promise<{ courseId: string; yearLevel: number } | null>;
+}
+
+/** What the single-add form and an import row both supply for a new student. */
+export type NewStudentInput = StudentDetails & {
+  email: string;
+  /** `null` for an imported student, who signs in with their email. */
+  username: string | null;
+  /** Coordinator-typed; omitted (always, on import) to have one generated. */
+  password?: string;
+  studentIdNumber: string;
+};
+
+/** A student validated and ready to insert — see `prepareStudentAccount`. */
+export interface PreparedStudentAccount {
+  email: string;
+  username: string | null;
+  fullName: string;
+  studentIdNumber: string;
+  hashedPassword: string;
+  /** Plaintext, for the login email or the one-time fallback. Never stored. */
+  temporaryPassword: string;
+  /** True when the coordinator typed the password rather than it being generated. */
+  passwordWasChosen: boolean;
+  profile: StudentDetails;
+}
+
+export interface CreatedStudentAccount {
+  id: string;
+  email: string;
+  username: string | null;
+  name: string;
+  role: string;
 }
 
 @Injectable()
@@ -185,6 +233,7 @@ export class CoordinatorService {
     data: StudentDetails,
     existingCourseId: string | null,
     existingCourseYearLevel: number | null,
+    lookup: CourseLookup = this.databaseCourseLookup,
   ): Promise<StudentDetails> {
     if (
       data.courseId === undefined &&
@@ -203,10 +252,7 @@ export class CoordinatorService {
         : existingCourseYearLevel;
 
     if (effectiveCourseId) {
-      const course = await this.prisma.client.course.findUnique({
-        where: { id: effectiveCourseId },
-        select: { name: true },
-      });
+      const course = await lookup.course(effectiveCourseId);
       if (!course) {
         throw new BadRequestException('courseId does not match a course');
       }
@@ -225,17 +271,9 @@ export class CoordinatorService {
           'Select a course before setting a year level',
         );
       }
-      const requirement = await this.prisma.client.courseRequirement.findUnique(
-        {
-          where: {
-            courseId_yearLevel: {
-              courseId: effectiveCourseId,
-              yearLevel: data.courseYearLevel,
-            },
-          },
-        },
-      );
-      if (!requirement) {
+      if (
+        !(await lookup.hasRequirement(effectiveCourseId, data.courseYearLevel))
+      ) {
         throw new BadRequestException(
           `This course has no OJT requirement defined for year ${data.courseYearLevel}.`,
         );
@@ -243,10 +281,7 @@ export class CoordinatorService {
     }
 
     if (data.blockId) {
-      const block = await this.prisma.client.block.findUnique({
-        where: { id: data.blockId },
-        select: { courseId: true, yearLevel: true },
-      });
+      const block = await lookup.block(data.blockId);
       if (!block) {
         throw new BadRequestException('blockId does not match a block');
       }
@@ -280,6 +315,144 @@ export class CoordinatorService {
     }
 
     return resolved;
+  }
+
+  /** The default `CourseLookup`: one query per question, for a single student. */
+  private readonly databaseCourseLookup: CourseLookup = {
+    course: (id) =>
+      this.prisma.client.course.findUnique({
+        where: { id },
+        select: { name: true },
+      }),
+    hasRequirement: async (courseId, yearLevel) =>
+      (await this.prisma.client.courseRequirement.findUnique({
+        where: { courseId_yearLevel: { courseId, yearLevel } },
+        select: { id: true },
+      })) !== null,
+    block: (id) =>
+      this.prisma.client.block.findUnique({
+        where: { id },
+        select: { courseId: true, yearLevel: true },
+      }),
+  };
+
+  /**
+   * Everything about a new student that is decided before the insert: the
+   * display name, the course/year/block resolution, and the temporary
+   * password and its hash.
+   *
+   * **The single definition of "a new student account"** — `createStudent`
+   * calls it for one student and the Excel import (`StudentImportService`)
+   * for each row, so an imported student is a single-added student, not a
+   * second implementation of one. `mustChangePassword` is not set here or
+   * anywhere: it is the schema default (true) for both.
+   *
+   * It does not check that the email, username or student number is free —
+   * the two callers do that differently (one lookup versus one bulk query).
+   */
+  async prepareStudentAccount(
+    data: NewStudentInput,
+    lookup: CourseLookup = this.databaseCourseLookup,
+  ): Promise<PreparedStudentAccount> {
+    const fullName = buildFullName(data);
+    if (!fullName) {
+      throw new BadRequestException(
+        'Provide either firstName and lastName, or name',
+      );
+    }
+
+    const profile = await this.resolveCourseFields(data, null, null, lookup);
+
+    // See createSupervisor's comment: omitted password -> generated one;
+    // mustChangePassword stays the schema default (true) either way.
+    const temporaryPassword = data.password ?? generateTemporaryPassword();
+
+    return {
+      email: data.email,
+      username: data.username,
+      fullName,
+      studentIdNumber: data.studentIdNumber,
+      hashedPassword: await bcrypt.hash(temporaryPassword, 10),
+      temporaryPassword,
+      passwordWasChosen: !!data.password,
+      profile,
+    };
+  }
+
+  /**
+   * Inserts prepared students: their `User` rows, then their `Student` rows.
+   * Must be given a transaction client — the two are separate rows, and a
+   * failure between them would leave a login with no profile, which every
+   * `/student/*` endpoint rejects.
+   *
+   * Two statements however many students there are (`createManyAndReturn`,
+   * then `createMany`), which is what lets an import of hundreds fit in one
+   * transaction. `createStudent` passes an array of one through the same two
+   * statements, so the rows are written identically either way.
+   *
+   * Returns the created accounts keyed by email — the database does not
+   * promise to return rows in the order they were sent.
+   */
+  async createStudentAccounts(
+    tx: Prisma.TransactionClient,
+    accounts: readonly PreparedStudentAccount[],
+  ): Promise<Map<string, CreatedStudentAccount>> {
+    if (accounts.length === 0) return new Map();
+
+    const users = await tx.user.createManyAndReturn({
+      data: accounts.map((account) => ({
+        email: account.email,
+        username: account.username,
+        password: account.hashedPassword,
+        name: account.fullName,
+        role: 'STUDENT' as const,
+      })),
+      select: { id: true, email: true, username: true, name: true, role: true },
+    });
+    const userByEmail = new Map(users.map((user) => [user.email, user]));
+
+    await tx.student.createMany({
+      data: accounts.map((account) => ({
+        userId: userByEmail.get(account.email)!.id,
+        studentIdNumber: account.studentIdNumber,
+        school: SCHOOL_NAME,
+        ...studentProfileData(account.profile),
+      })),
+    });
+
+    return userByEmail;
+  }
+
+  /**
+   * Emails many just-created students their logins, in the background, and
+   * records each outcome as it happens — the import's counterpart to
+   * `issueCredentials`. Returns immediately; nothing here is awaited by the
+   * request, and nothing it does can fail the import that already committed.
+   */
+  queueStudentCredentials(
+    accounts: ReadonlyArray<{
+      user: CreatedStudentAccount;
+      temporaryPassword: string;
+    }>,
+  ): void {
+    void this.credentialsEmail
+      .deliverBatch(
+        accounts.map(({ user, temporaryPassword }) => ({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          username: user.username,
+          role: 'STUDENT' as const,
+          temporaryPassword,
+          kind: 'CREATED' as const,
+        })),
+      )
+      .catch((err: unknown) => {
+        this.logger.error(
+          `Queued login emails for ${accounts.length} imported student(s) did not all complete: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      });
   }
 
   async createSupervisor(data: {
@@ -370,45 +543,15 @@ export class CoordinatorService {
       );
     }
 
-    const fullName = buildFullName(data);
-    if (!fullName) {
-      throw new BadRequestException(
-        'Provide either firstName and lastName, or name',
-      );
-    }
-
-    const resolved = await this.resolveCourseFields(data, null, null);
-
-    // See createSupervisor's comment: omitted password -> generated one;
-    // mustChangePassword stays the schema default (true) either way.
-    const temporaryPassword = data.password ?? generateTemporaryPassword();
-    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+    const account = await this.prepareStudentAccount(data);
 
     // User and Student are separate rows. Without a transaction a failure on
     // the second write would leave a login with no profile, which every
     // /student/* endpoint then rejects with "Student profile not found".
     const user = await this.prisma.client.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: {
-          email: data.email,
-          username: data.username,
-          password: hashedPassword,
-          name: fullName,
-          role: 'STUDENT',
-        },
-      });
-
-      await tx.student.create({
-        data: {
-          userId: created.id,
-          studentIdNumber: data.studentIdNumber,
-          school: SCHOOL_NAME,
-          ...studentProfileData(resolved),
-        },
-      });
-
+      const created = await this.createStudentAccounts(tx, [account]);
       return tx.user.findUniqueOrThrow({
-        where: { id: created.id },
+        where: { id: created.get(account.email)!.id },
         include: { studentProfile: true },
       });
     });
@@ -416,7 +559,7 @@ export class CoordinatorService {
     // After the transaction has committed — see createSupervisor.
     const issued = await this.issueCredentials(
       user,
-      temporaryPassword,
+      account.temporaryPassword,
       'CREATED',
     );
 
@@ -424,7 +567,9 @@ export class CoordinatorService {
     return {
       ...result,
       ...issued,
-      temporaryPassword: data.password ? undefined : issued.temporaryPassword,
+      temporaryPassword: account.passwordWasChosen
+        ? undefined
+        : issued.temporaryPassword,
     };
   }
 
@@ -1936,6 +2081,7 @@ function studentProfileData(data: StudentDetails) {
     firstName: data.firstName,
     lastName: data.lastName,
     middleInitial: data.middleInitial,
+    gender: data.gender,
     age: data.age,
     dateOfBirth: toNullableDate(data.dateOfBirth),
     contactNumber: data.contactNumber,

@@ -261,6 +261,85 @@ export interface CreateStudentResponse {
 
 export type UpdateStudentRequest = StudentDetailsRequest;
 
+/* ---------------------------------------------------------------------------
+ * Batch import from Excel
+ * ------------------------------------------------------------------------ */
+
+/** The server's ceilings, pre-checked client-side for a faster no. */
+export const MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_IMPORT_ROWS = 500;
+
+/** One row of the uploaded sheet, normalised and judged by the server. */
+export interface ImportRow {
+  /** The row's number as Excel shows it. */
+  rowNumber: number;
+  status: "VALID" | "ERROR";
+  /** Every reason the row is rejected — empty when VALID. */
+  reasons: string[];
+  values: {
+    studentNumber: string;
+    lastName: string;
+    firstName: string;
+    middleName: string;
+    middleInitial: string | null;
+    sex: "Male" | "Female" | null;
+    /** `yyyy-mm-dd`, or `null` if the cell was not a valid date. */
+    birthdate: string | null;
+    age: number | null;
+    email: string;
+    contactNumber: string;
+    course: string;
+    courseId: string | null;
+    yearLevel: number | null;
+  };
+}
+
+interface ImportBlock {
+  id: string;
+  name: string;
+  courseId: string;
+  yearLevel: number;
+}
+
+/** `POST …/import/preview` — nothing has been written. */
+export interface ImportPreview {
+  block: ImportBlock | null;
+  counts: { total: number; valid: number; errors: number };
+  rows: ImportRow[];
+}
+
+/** A login the coordinator must hand over, because it was not emailed. */
+export interface ImportedCredential {
+  rowNumber: number;
+  studentNumber: string;
+  name: string;
+  /** Their email — an imported account has no username. */
+  loginId: string;
+  /** Plaintext, in this one response only. */
+  temporaryPassword: string;
+}
+
+/** `POST …/import/commit` — the valid rows were created in one transaction. */
+export interface ImportResult {
+  created: number;
+  rejected: { rowNumber: number; studentNumber: string; reasons: string[] }[];
+  block: ImportBlock | null;
+  /**
+   * QUEUED — login emails are being sent in the background; no password is in
+   * this response. NOT_CONFIGURED — email is off; `credentials` has each one,
+   * once.
+   */
+  emailMode: "QUEUED" | "NOT_CONFIGURED";
+  credentials?: ImportedCredential[];
+}
+
+/** The template as something a link can save: an object URL and its name. */
+export interface ImportTemplateDownload {
+  /** From `URL.createObjectURL`; the caller revokes it after the click. */
+  url: string;
+  filename: string;
+}
+
 export const studentApi = createApi({
   reducerPath: "studentApi",
   baseQuery: baseQueryWithAuth,
@@ -388,6 +467,55 @@ export const studentApi = createApi({
         }
       },
     }),
+    /**
+     * The Excel template. Goes through the slice rather than a plain
+     * `<a href>` because the route is bearer-authenticated. The response is
+     * turned into an object URL here — a string — so no Blob is ever put in
+     * the store; the caller clicks it and revokes it. Never cached.
+     */
+    downloadImportTemplate: builder.query<ImportTemplateDownload, void>({
+      query: () => ({
+        url: "/coordinator/students/import/template",
+        responseHandler: async (response) => {
+          // An error still answers in Nest's JSON shape.
+          if (!response.ok) return response.json();
+          return {
+            url: URL.createObjectURL(await response.blob()),
+            filename: "OJT-Track-student-import-template.xlsx",
+          };
+        },
+      }),
+      keepUnusedDataFor: 0,
+    }),
+    /** `body` is FormData: `file` (.xlsx) and optional `blockId`. Writes nothing. */
+    previewStudentImport: builder.mutation<ImportPreview, FormData>({
+      query: (body) => ({
+        url: "/coordinator/students/import/preview",
+        method: "POST",
+        body,
+      }),
+    }),
+    /**
+     * The same FormData again. The server re-parses and re-validates the file
+     * from scratch, then creates the valid rows in one transaction.
+     */
+    commitStudentImport: builder.mutation<ImportResult, FormData>({
+      query: (body) => ({
+        url: "/coordinator/students/import/commit",
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: ["Student"],
+      // New students change the dashboard's counts too.
+      async onQueryStarted(_body, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled;
+          dispatch(dashboardApi.util.invalidateTags(["Dashboard"]));
+        } catch {
+          // Import failed — nothing was created.
+        }
+      },
+    }),
   }),
 });
 
@@ -402,4 +530,7 @@ export const {
   useGetAssignmentsQuery,
   useUpdateAssignmentMutation,
   useSetAssignmentGradeMutation,
+  useLazyDownloadImportTemplateQuery,
+  usePreviewStudentImportMutation,
+  useCommitStudentImportMutation,
 } = studentApi;

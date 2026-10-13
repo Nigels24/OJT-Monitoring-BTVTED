@@ -138,13 +138,35 @@ export class MailService implements OnModuleInit {
    * Emails many accounts their logins, one after another, and resolves with
    * one result per input in the same order. One failure does not stop the
    * rest.
+   *
+   * `onResult`, when given, is called as each email finishes — a batch of
+   * hundreds takes minutes at one a second, and a caller recording outcomes
+   * should not have to wait for the last one to record the first. It is
+   * awaited inside that email's slot; anything it throws is the caller's to
+   * catch, and never disturbs the queue.
    */
   sendLoginCredentialsBatch(
     mails: readonly LoginCredentialsMail[],
+    onResult?: (index: number, result: MailResult) => Promise<void> | void,
   ): Promise<MailResult[]> {
     // Each call enqueues immediately, so the batch keeps its order and shares
     // the queue (and its gap) with anything else being sent.
-    return Promise.all(mails.map((mail) => this.sendLoginCredentials(mail)));
+    return Promise.all(
+      mails.map(async (mail, index) => {
+        const result = await this.sendLoginCredentials(mail);
+        if (onResult) {
+          try {
+            await onResult(index, result);
+          } catch (err) {
+            this.logger.error(
+              `Recording the result of a login email to ${mail.to} failed: ` +
+                (err instanceof Error ? err.message : String(err)),
+            );
+          }
+        }
+        return result;
+      }),
+    );
   }
 
   /** One send, after the gap. Runs strictly one at a time via the queue. */
