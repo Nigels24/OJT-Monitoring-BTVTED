@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — only src/common/assignment-grade.spec.ts so far (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — src/common/assignment-grade.spec.ts and weekly-tasks.spec.ts so far (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -49,7 +49,7 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -174,6 +174,20 @@ A placement is assessed twice, and the two figures are **never combined**: the s
 - Who sees what: the coordinator gets everything on `GET /coordinator/students/:id/assignments`; the student gets grade, remarks, who/when in `GET /student/dashboard` (`assessment`); the supervisor gets grade and who/when but **never the remarks** (`GET /supervisor/students`, and `trainingAssignment` on every evaluation via `EVALUATION_INCLUDE`) — the same call as a journal's `coordinatorRemarks` (§12).
 
 **Print view.** `features/evaluation/components/EvaluationPrintView.tsx` + `EvaluationPrintSheet.tsx` render one evaluation in the paper form's order with signature lines, at `/coordinator/evaluations/[id]/print`, `/supervisor/evaluation/[id]/print` and `/student/evaluations/[id]/print` (one per role because `proxy.ts` routes by prefix). The pages have no sidebar; the toolbar is `print:hidden` and `@page` A4 lives in `app/globals.css`. The sheet uses borders, not background fills (browsers drop backgrounds when printing), and the total is a body row, not a `<tfoot>` (which repeats on every page). The legend comes from the evaluation's own `scale` (`SCORE_SCALE`), so the client still restates nothing. Coordinator and supervisor pages read from their existing list queries; the student has `GET /student/evaluations/:id` (own sheets only). This is separate from the pdfkit download in §9, which is still coordinator-only.
+
+### 14. Weekly tasks and the weekly task report (MOV)
+
+`WeeklyTaskModule` (`src/weekly-task/`) follows the journal's shape: one service, three role-prefixed controllers. A `WeeklyTask` belongs to a `TrainingAssignment` (`studentId` denormalised) and to one week — `weekStart` is always that week's **Monday** at UTC midnight, normalised by `weekStartOf` whatever day was sent. The status and week rules are pure functions in `src/common/weekly-tasks.ts` (unit-tested); reuse them rather than re-deriving a Monday or a status check.
+
+- **Lifecycle:** `ASSIGNED` → `DONE` (student, optional note + up to 5 proof photos) → `RATED` (supervisor, 1–5 + optional comment). The supervisor may edit/delete only while `ASSIGNED`; the student may undo `DONE` until it is rated, which **removes the note and photos**, so photos only ever exist on a DONE/RATED task. A rating can be corrected; an unchanged save is a no-op.
+- **A weekly rating is its own figure.** Nothing in this module reads or writes `Evaluation` or `coordinatorGrade` (§9, §13), and the week average (rated tasks only, a plain number, `null` when none) is never combined with either.
+- **Scope:** supervisors by the *assignment's* establishment (§2). Assigning, editing and deleting need an ACTIVE assignment; listing and rating do not, so work done before a transfer can still be rated. Students see only their own. The coordinator is read-only and unscoped, like its other single-record reads.
+- **Photos** use the journal's pipeline unchanged (§7): magic-byte JPG/PNG check, private bucket under `weekly-tasks/<studentId>/`, signed URLs in the list response, name `StudentNo_TASK_<yyyymmdd>_<n>_SURNAME.ext`. `WeeklyTaskPhoto` deliberately has **no** `onDelete: Cascade` (§6): every delete path removes photo rows explicitly, then the files after the commit.
+- **Cascade (§6):** `deleteStudentCascade` deletes the student's tasks and photos and returns the photo paths; `deleteSupervisorCascade` **nulls** `supervisorId` — the task is the trainee's record and survives, like approved attendance.
+- **Notifications (§11):** `WEEKLY_TASK_ASSIGNED:${id}` to the student; `WEEKLY_TASK_DONE:${id}:${doneAt}` to the assigning supervisor (every supervisor at the establishment if that account is gone); `WEEKLY_TASK_RATED:${id}:${ratedAt}` to the student. `doneAt`/`ratedAt` are the version markers, so keep them moving only on a real change.
+- **One response shape.** Every role's `GET .../weekly-tasks?assignmentId&week` returns the same week object (tasks, photos, counts, average, header fields), and the printed report renders from it — there is no separate summary endpoint to drift.
+
+Client: `features/weekly-tasks/`, slice `lib/api/weeklyTaskApi.ts`. Print routes are `/{student,supervisor,coordinator}/weekly-tasks/print?assignment=…&week=…`. `components/ui/PrintPage.tsx` is the shared print shell (toolbar + A4 frame) used by this report and by the §13 evaluation sheet. Pages that read the URL wrap `useSearchParams` in `<Suspense>`, as the students page does.
 
 ### Client
 

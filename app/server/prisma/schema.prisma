@@ -59,6 +59,14 @@ enum JournalStatus {
   RETURNED
 }
 
+/// ASSIGNED -> DONE (the student marks it, and may undo it) -> RATED (the
+/// supervisor rates it, which is final for the student).
+enum WeeklyTaskStatus {
+  ASSIGNED
+  DONE
+  RATED
+}
+
 /// Which phase of the placement a required document belongs to (thesis Table 3).
 enum DocumentStage {
   APPLICATION
@@ -76,6 +84,9 @@ enum NotificationType {
   ASSESSMENT_COMPLETED
   CONCERN_RAISED
   PLACEMENT_RECORDED
+  WEEKLY_TASK_ASSIGNED
+  WEEKLY_TASK_DONE
+  WEEKLY_TASK_RATED
 }
 
 model User {
@@ -149,6 +160,7 @@ model Supervisor {
 
   attendanceApprovals Attendance[] @relation("ApprovedBy")
   evaluations         Evaluation[]
+  weeklyTasks         WeeklyTask[]
 }
 
 model Coordinator {
@@ -266,6 +278,7 @@ model TrainingAssignment {
   documents      Document[]
   evaluations    Evaluation[]
   journalEntries JournalEntry[]
+  weeklyTasks    WeeklyTask[]
 
   @@index([studentId, status])
 }
@@ -350,6 +363,87 @@ model JournalPhoto {
   createdAt    DateTime @default(now())
 }
 
+/// One task a supervisor assigns a trainee for one week, which the trainee
+/// marks done (with optional proof photos) and the supervisor then rates 1-5.
+/// Printed per week as the means of verification (MOV) for the daily journal.
+///
+/// Attached to the TrainingAssignment like JournalEntry, and for the same
+/// reason: a week's tasks belong to a placement, so a student who transfers
+/// starts a fresh list at the new establishment. `studentId` is denormalised
+/// from the assignment purely for the student's own list.
+///
+/// The rating here is its own figure. It is never read by the supervisor's
+/// Evaluation (totalRating) or the coordinator's grade (CLAUDE.md §14).
+model WeeklyTask {
+  id                   String             @id @default(cuid())
+  trainingAssignmentId String
+  trainingAssignment   TrainingAssignment @relation(fields: [trainingAssignmentId], references: [id])
+  studentId            String
+  student              Student            @relation(fields: [studentId], references: [id])
+
+  /// Who assigned it. Nullable so the task — the trainee's own record, with
+  /// their proof and rating on it — survives that supervisor's account being
+  /// deleted, the same call as Attendance.approvedById (see cascade-delete.ts).
+  supervisorId String?
+  supervisor   Supervisor? @relation(fields: [supervisorId], references: [id])
+
+  /// The Monday of the week the task belongs to, as UTC midnight like every
+  /// other date-only column. Always normalised by `weekStartOf`
+  /// (src/common/weekly-tasks.ts), whatever day of that week was sent.
+  weekStart DateTime @db.Date
+
+  title       String
+  description String?
+  dueDate     DateTime @db.Date
+
+  status      WeeklyTaskStatus @default(ASSIGNED)
+  /// Set when the student marks the task done, cleared if they undo it. Also
+  /// the version marker of the "done" notification's dedupeKey.
+  doneAt      DateTime?
+  studentNote String?
+
+  /// 1-5, set by the supervisor on a DONE task. Correctable afterwards;
+  /// `ratedAt` moves only when the rating or its comment actually changes, so
+  /// it doubles as the "rated" notification's version marker.
+  rating        Int?
+  ratingComment String?
+  ratedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos WeeklyTaskPhoto[]
+
+  @@index([trainingAssignmentId, weekStart])
+  @@index([studentId, weekStart])
+}
+
+/// A proof photo the student attaches when marking a task done.
+///
+/// Same columns as JournalPhoto, but deliberately WITHOUT its
+/// `onDelete: Cascade`: CLAUDE.md §6 allows that exception twice and this is
+/// not a third. Every path that removes a task deletes its photo rows
+/// explicitly first, and removes the storage objects after the commit.
+model WeeklyTaskPhoto {
+  id           String     @id @default(cuid())
+  weeklyTaskId String
+  weeklyTask   WeeklyTask @relation(fields: [weeklyTaskId], references: [id])
+
+  /// Bucket key inside the private `student-files` bucket (`weekly-tasks/...`).
+  /// Never a public URL — reads go through a short-lived signed URL.
+  storagePath  String
+  /// The system-applied name (`StudentNo_TASK_<date>_<n>_SURNAME.jpg`), not
+  /// whatever the phone called the file — see src/common/file-upload.ts.
+  originalName String
+  /// Derived from the file's magic bytes, never from the request headers.
+  mimeType     String
+  sizeBytes    Int
+  sortOrder    Int
+  uploadedAt   DateTime @default(now())
+
+  @@index([weeklyTaskId])
+}
+
 model Student {
   id              String @id @default(cuid())
   userId          String @unique
@@ -403,6 +497,7 @@ model Student {
   evaluations         Evaluation[]
   trainingAssignments TrainingAssignment[]
   journalEntries      JournalEntry[]
+  weeklyTasks         WeeklyTask[]
 }
 
 model Attendance {

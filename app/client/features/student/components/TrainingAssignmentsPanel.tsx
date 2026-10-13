@@ -10,6 +10,7 @@ import {
 import { formatDateOnly } from "@/lib/format";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import CoordinatorGradeCard from "./CoordinatorGradeCard";
+import PlacementWeeklyTasks from "@/features/weekly-tasks/components/PlacementWeeklyTasks";
 
 const STATUS_VARIANT: Record<AssignmentStatus, BadgeVariant> = {
   ACTIVE: "active",
@@ -199,6 +200,7 @@ export default function TrainingAssignmentsPanel({
           )}
 
           <CoordinatorGradeCard assignment={a} />
+          <PlacementWeeklyTasks assignmentId={a.id} />
         </div>
       ))}
     </div>

@@ -17,6 +17,7 @@ import { CourseModule } from './course/course.module';
 import { NotificationModule } from './notification/notification.module';
 import { JournalModule } from './journal/journal.module';
 import { DocumentModule } from './document/document.module';
+import { WeeklyTaskModule } from './weekly-task/weekly-task.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { DocumentModule } from './document/document.module';
     NotificationModule,
     JournalModule,
     DocumentModule,
+    WeeklyTaskModule,
   ],
   controllers: [AppController],
   providers: [AppService],

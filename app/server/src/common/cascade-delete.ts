@@ -84,6 +84,11 @@ export async function deleteStudentCascade(
     where: { journalEntry: { studentId } },
     select: { storagePath: true },
   });
+  // Weekly-task proof photos, likewise captured before their rows go.
+  const weeklyTaskPhotos = await tx.weeklyTaskPhoto.findMany({
+    where: { weeklyTask: { studentId } },
+    select: { storagePath: true },
+  });
 
   await tx.attendance.deleteMany({ where: { studentId } });
   await tx.document.deleteMany({ where: { studentId } });
@@ -100,6 +105,14 @@ export async function deleteStudentCascade(
   // comment on why that exception is safe) — no separate deleteMany needed,
   // but their storage paths were captured above.
   await tx.journalEntry.deleteMany({ where: { studentId } });
+  // Weekly tasks also hold a hard FK to TrainingAssignment, so they go before
+  // the assignments too. Photos first and explicitly: unlike JournalPhoto,
+  // WeeklyTaskPhoto has no onDelete: Cascade (the schema says why), so a
+  // leftover photo row would abort the task delete.
+  await tx.weeklyTaskPhoto.deleteMany({
+    where: { weeklyTask: { studentId } },
+  });
+  await tx.weeklyTask.deleteMany({ where: { studentId } });
   // TrainingAssignment.studentId is onDelete: Restrict, so this must run
   // before tx.student.delete below or that delete aborts on a leftover row.
   // Deleting the student is an explicit full removal — their assignments
@@ -118,11 +131,18 @@ export async function deleteStudentCascade(
     ...documents.map((row) => row.fileUrl),
     ...credentials.map((row) => row.fileUrl),
     ...journalPhotos.map((row) => row.storagePath),
+    ...weeklyTaskPhotos.map((row) => row.storagePath),
   ];
 }
 
 /**
  * Deletes a supervisor, their evaluations, and their login.
+ *
+ * Weekly tasks they assigned are **kept** and merely lose their assigner, for
+ * the same reason as the attendance below: the task, the trainee's proof
+ * photos and its rating are the student's record (and the journal's means of
+ * verification), not the supervisor's. `WeeklyTask.supervisorId` is nullable
+ * for exactly this. No files are removed, so nothing is returned.
  *
  * Attendance they actioned is **kept** and merely loses its approver: a
  * student's approved hours are their own record and must survive their
@@ -141,6 +161,10 @@ export async function deleteSupervisorCascade(
   await tx.attendance.updateMany({
     where: { approvedById: supervisorId },
     data: { approvedById: null },
+  });
+  await tx.weeklyTask.updateMany({
+    where: { supervisorId },
+    data: { supervisorId: null },
   });
 
   await deleteMessagingFootprint(tx, userId);

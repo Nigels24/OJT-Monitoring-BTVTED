@@ -15,7 +15,10 @@ export type NotificationType =
   | "DOCUMENT_REVIEWED"
   | "ASSESSMENT_COMPLETED"
   | "CONCERN_RAISED"
-  | "PLACEMENT_RECORDED";
+  | "PLACEMENT_RECORDED"
+  | "WEEKLY_TASK_ASSIGNED"
+  | "WEEKLY_TASK_DONE"
+  | "WEEKLY_TASK_RATED";
 
 export interface AppNotification {
   id: string;

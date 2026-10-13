@@ -15,6 +15,7 @@ import { courseApi } from "./api/courseApi";
 import { userManagementApi } from "./api/userManagementApi";
 import { notificationsApi } from "./api/notificationsApi";
 import { journalApi } from "./api/journalApi";
+import { weeklyTaskApi } from "./api/weeklyTaskApi";
 
 export const store = configureStore({
   reducer: {
@@ -34,6 +35,7 @@ export const store = configureStore({
     [userManagementApi.reducerPath]: userManagementApi.reducer,
     [notificationsApi.reducerPath]: notificationsApi.reducer,
     [journalApi.reducerPath]: journalApi.reducer,
+    [weeklyTaskApi.reducerPath]: weeklyTaskApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
@@ -62,7 +64,8 @@ export const store = configureStore({
       courseApi.middleware,
       userManagementApi.middleware,
       notificationsApi.middleware,
-      journalApi.middleware
+      journalApi.middleware,
+      weeklyTaskApi.middleware
     ),
 });
 
