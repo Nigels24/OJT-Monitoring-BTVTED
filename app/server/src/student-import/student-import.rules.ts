@@ -1,4 +1,5 @@
 import { isEmail } from 'class-validator';
+import { ageOn } from '../common/age';
 
 /**
  * The rules of the Excel student import that need neither a spreadsheet nor a
@@ -140,18 +141,6 @@ export function normaliseSex(value: unknown): 'Male' | 'Female' | null {
 }
 
 /**
- * Middle Name -> the one letter the schema stores (`Student.middleInitial`).
- *
- * The only place that mapping is written: the template asks for the full
- * middle name, the schema keeps an initial, and the student fields are due to
- * be revisited — change it here and nowhere else.
- */
-export function middleInitialFrom(middleName: unknown): string | null {
-  const first = toText(middleName).match(/\p{L}/u)?.[0];
-  return first ? first.toUpperCase() : null;
-}
-
-/**
  * A birthdate cell as a UTC-midnight date (the form every date-only column is
  * stored in), or `null` if it is not a real calendar date.
  *
@@ -185,21 +174,6 @@ function utcDate(year: number, month: number, day: number): Date | null {
     date.getUTCDate() === day
     ? date
     : null;
-}
-
-/**
- * Completed years between a birthdate and today — computed, never read from
- * the file. Both are UTC-midnight date-only values (`today` is Manila's, see
- * `common/dates.ts`).
- */
-export function ageOn(birthdate: Date, today: Date): number {
-  let age = today.getUTCFullYear() - birthdate.getUTCFullYear();
-  const hadBirthdayThisYear =
-    today.getUTCMonth() > birthdate.getUTCMonth() ||
-    (today.getUTCMonth() === birthdate.getUTCMonth() &&
-      today.getUTCDate() >= birthdate.getUTCDate());
-  if (!hadBirthdayThisYear) age -= 1;
-  return age;
 }
 
 /** A whole number from a numeric or text cell ("4", 4, "4.0"); else `null`. */
@@ -272,12 +246,15 @@ export interface ImportRowValues {
   studentNumber: string;
   lastName: string;
   firstName: string;
+  /** The full middle name, stored as given (title-cased). */
   middleName: string;
-  middleInitial: string | null;
   sex: 'Male' | 'Female' | null;
   /** `yyyy-mm-dd`, or `null` when the cell was not a valid date. */
   birthdate: string | null;
-  /** Computed from the birthdate. */
+  /**
+   * Computed from the birthdate (`common/age.ts`) to check the age limits and
+   * to show in the preview. Never read from the file, and not stored.
+   */
   age: number | null;
   email: string;
   contactNumber: string;
@@ -479,7 +456,6 @@ function normaliseRow(
     lastName: titleCaseName(cells.lastName),
     firstName: titleCaseName(cells.firstName),
     middleName: titleCaseName(cells.middleName),
-    middleInitial: middleInitialFrom(cells.middleName),
     sex: normaliseSex(cells.sex),
     birthdate: birthdate ? dateKey(birthdate) : null,
     age: birthdate ? ageOn(birthdate, context.today) : null,

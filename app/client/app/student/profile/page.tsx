@@ -20,6 +20,8 @@ import {
   Pencil,
 } from "lucide-react";
 import { STUDENT_NAV } from "@/features/student-portal/nav";
+import { formatAge, formatLastFirst } from "@/lib/person-name";
+import { formatAddress } from "@/lib/address/ph-locations";
 import { useProfile } from "@/features/student-portal/hooks/use-profile";
 import ProfileEditForm from "@/features/student-portal/components/ProfileEditForm";
 import { formatDateOnly } from "@/lib/format";
@@ -34,6 +36,8 @@ export default function StudentProfilePage() {
     error,
     isEditing,
     isSubmitting,
+    address: formAddress,
+    setAddress,
     setField,
     startEditing,
     cancelEditing,
@@ -41,10 +45,19 @@ export default function StudentProfilePage() {
   } = useProfile();
 
   const displayName = data?.user.name ?? "Student";
-  const fullName =
-    [data?.firstName, data?.middleInitial, data?.lastName]
-      .filter(Boolean)
-      .join(" ") || displayName;
+  const fullName = (data && formatLastFirst(data)) || displayName;
+  const address = data
+    ? formatAddress({
+        streetAddress: data.streetAddress,
+        barangay: data.barangay,
+        city: data.cityMunicipality,
+        province: data.province,
+        region: data.region,
+        postalCode: data.postalCode,
+      }) ||
+      // An older record, entered before the address was structured.
+      data.legacyAddress
+    : null;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -82,21 +95,31 @@ export default function StudentProfilePage() {
                 Personal Details
               </h2>
               <div className="space-y-3">
-                <DetailItem label="Full Name" value={fullName} icon={UserCircle} />
+                <DetailItem label="Name" value={fullName} icon={UserCircle} />
                 <DetailItem
                   label="Student ID"
                   value={data.studentIdNumber}
                   icon={IdCard}
                 />
                 <DetailItem label="Email" value={data.user.email} icon={Mail} />
-                <DetailItem label="Gender" value={data.gender} icon={Users} />
+                <DetailItem label="Sex" value={data.gender} icon={Users} />
                 <DetailItem
                   label="Date of Birth"
-                  value={formatDateOnly(data.dateOfBirth, "") || null}
+                  // Age comes from the server, worked out from this date.
+                  value={
+                    [formatDateOnly(data.dateOfBirth, ""), formatAge(data.age)]
+                      .filter(Boolean)
+                      .join(" · ") || null
+                  }
                   icon={Cake}
                 />
-                <DetailItem label="Course" value={data.course} icon={GraduationCap} />
+                <DetailItem
+                  label="Program"
+                  value={data.enrolledCourse?.name ?? data.course}
+                  icon={GraduationCap}
+                />
                 <DetailItem label="Year Level" value={data.yearLevel} icon={GraduationCap} />
+                <DetailItem label="Block" value={data.block?.name} icon={GraduationCap} />
                 <DetailItem label="School" value={SCHOOL_NAME} icon={School} />
               </div>
             </Card>
@@ -155,6 +178,8 @@ export default function StudentProfilePage() {
                   error={error}
                   isSubmitting={isSubmitting}
                   setField={setField}
+                  address={formAddress}
+                  setAddress={setAddress}
                   onSubmit={handleSubmit}
                   onCancel={cancelEditing}
                 />
@@ -165,7 +190,7 @@ export default function StudentProfilePage() {
                     value={data.contactNumber}
                     icon={Phone}
                   />
-                  <DetailItem label="Address" value={data.address} icon={MapPin} />
+                  <DetailItem label="Address" value={address} icon={MapPin} />
                   <p className="text-xs text-gray-500 pt-1">
                     Only your contact number and address can be updated here.
                     Everything else is managed by your coordinator.

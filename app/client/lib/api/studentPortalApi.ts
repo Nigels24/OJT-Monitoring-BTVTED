@@ -33,9 +33,9 @@ export interface StudentDashboard {
   studentIdNumber: string;
   course: string | null;
   yearLevel: string | null;
-  school: string | null;
   contactNumber: string | null;
-  address: string | null;
+  /** Computed by the server from the date of birth; read-only. */
+  age: number | null;
   requiredHours: number;
   startDate: string | null;
   status: string;
@@ -114,28 +114,49 @@ export interface StudentProfile {
   studentIdNumber: string;
   course: string | null;
   yearLevel: string | null;
-  school: string | null;
   firstName: string | null;
   lastName: string | null;
-  middleInitial: string | null;
-  age: number | null;
+  /** The full middle name; `lib/person-name.ts` derives an initial from it. */
+  middleName: string | null;
   dateOfBirth: string | null;
+  /**
+   * Computed by the server from `dateOfBirth`, as of today. Read-only; `null`
+   * when there is no date of birth.
+   */
+  age: number | null;
+  /** "Sex" in the UI: Male or Female. */
   gender: string | null;
   contactNumber: string | null;
-  address: string | null;
+  /** The standardized address, as names chosen from the PSGC lists. */
+  region: string | null;
+  province: string | null;
+  cityMunicipality: string | null;
+  barangay: string | null;
+  streetAddress: string | null;
+  postalCode: string | null;
+  /** DEPRECATED, read-only: the old free-text address, if one was entered. */
+  legacyAddress: string | null;
   requiredHours: number;
   startDate: string | null;
   endDate: string | null;
   status: string;
   user: { id: string; email: string; name: string };
   establishment: { id: string; name: string } | null;
+  enrolledCourse: { id: string; code: string; name: string } | null;
+  block: { id: string; name: string } | null;
 }
 
-/** The only two fields a student may edit on their own record. */
+/** What a student may edit on their own record: contact number and address. */
 export interface UpdateProfileRequest {
   /** `null` clears the field; omitting it leaves the stored value alone. */
   contactNumber?: string | null;
-  address?: string | null;
+  region?: string | null;
+  province?: string | null;
+  cityMunicipality?: string | null;
+  barangay?: string | null;
+  streetAddress?: string | null;
+  /** 4 digits; must be the known code where the city/municipality has one. */
+  postalCode?: string | null;
 }
 
 export type DocumentStatus = "PENDING" | "APPROVED" | "REJECTED";

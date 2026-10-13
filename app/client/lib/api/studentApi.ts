@@ -153,12 +153,29 @@ export interface Student {
   username?: string | null;
   firstName?: string | null;
   lastName?: string | null;
-  middleInitial?: string | null;
-  age?: number | null;
+  /** The full middle name; `lib/person-name.ts` derives an initial from it. */
+  middleName?: string | null;
+  /** "Sex" in the UI: Male or Female. */
+  gender?: "Male" | "Female" | null;
   dateOfBirth?: string | null;
-  school?: string | null;
+  /**
+   * Computed by the server from `dateOfBirth`, as of today. Read-only — there
+   * is no age to type or send; `null` when there is no date of birth.
+   */
+  age?: number | null;
   contactNumber?: string | null;
-  address?: string | null;
+  /** The standardized address, as names chosen from the PSGC lists. */
+  region?: string | null;
+  province?: string | null;
+  cityMunicipality?: string | null;
+  barangay?: string | null;
+  streetAddress?: string | null;
+  postalCode?: string | null;
+  /**
+   * DEPRECATED, read-only: the free-text address older records were given.
+   * Shown only where no structured address has been entered yet.
+   */
+  legacyAddress?: string | null;
   /** DEPRECATED free-text fields — still populated for students not yet on
    * a structured Course/Block (see `courseId`/`blockId` below). */
   course?: string | null;
@@ -204,18 +221,27 @@ export interface Student {
  * value alone. `requiredHours` and `status` are NOT NULL server-side, so they
  * are omit-only.
  *
- * `school` is deliberately absent — the server ignores any client-supplied
- * value and always sets it to the one permanent school name (`SCHOOL_NAME`,
- * `lib/school.ts`), so there is nothing for this form to send.
+ * There is no `age` (the server computes it from `dateOfBirth`), no `school`
+ * (one fixed school, `lib/school.ts`) and no free-text `address` (replaced by
+ * the structured fields; the old line survives read-only as `legacyAddress`).
+ * The server rejects a body that sends any of them.
  */
 export interface StudentDetailsRequest {
   firstName?: string | null;
   lastName?: string | null;
-  middleInitial?: string | null;
-  age?: number | null;
+  middleName?: string | null;
+  /** "Sex": Male or Female. */
+  gender?: "Male" | "Female" | null;
+  /** There is no `age` to send — the server computes it from this. */
   dateOfBirth?: string | null;
   contactNumber?: string | null;
-  address?: string | null;
+  region?: string | null;
+  province?: string | null;
+  cityMunicipality?: string | null;
+  barangay?: string | null;
+  streetAddress?: string | null;
+  /** 4 digits; must be the known code where the city/municipality has one. */
+  postalCode?: string | null;
   /** DEPRECATED — set automatically from `courseId`/`courseYearLevel` below
    * when those are sent; only used directly for a student not on a course yet. */
   course?: string | null;
@@ -281,7 +307,6 @@ export interface ImportRow {
     lastName: string;
     firstName: string;
     middleName: string;
-    middleInitial: string | null;
     sex: "Male" | "Female" | null;
     /** `yyyy-mm-dd`, or `null` if the cell was not a valid date. */
     birthdate: string | null;

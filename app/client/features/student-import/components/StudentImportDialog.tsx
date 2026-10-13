@@ -13,6 +13,7 @@ import SelectField from "@/components/ui/SelectField";
 import Button from "@/components/ui/Button";
 import { MAX_IMPORT_ROWS } from "@/lib/api/studentApi";
 import { ImportFilter, useStudentImport } from "../hooks/use-student-import";
+import { formatLastFirst } from "@/lib/person-name";
 
 interface StudentImportDialogProps {
   open: boolean;
@@ -226,14 +227,7 @@ export default function StudentImportDialog({
                         {row.values.studentNumber || "—"}
                       </td>
                       <td className="px-3 py-2 text-gray-900">
-                        {[
-                          row.values.lastName,
-                          [row.values.firstName, row.values.middleInitial]
-                            .filter(Boolean)
-                            .join(" "),
-                        ]
-                          .filter(Boolean)
-                          .join(", ") || "—"}
+                        {formatLastFirst(row.values) || "—"}
                         <div className="text-xs text-gray-500">
                           {[row.values.sex, row.values.birthdate]
                             .filter(Boolean)

@@ -53,8 +53,9 @@ class SubmitAttendanceDto {
   remarks?: string;
 }
 
-// Students may only ever touch these two fields on their own record — every
-// other field (name, course, requiredHours, status, ...) is coordinator-owned.
+// Students may only ever touch their contact number and their address on their
+// own record — every other field (name, date of birth, course, status, ...) is
+// coordinator-owned.
 // Declaring nothing else here is what makes forbidNonWhitelisted reject an
 // attempt to slip one in.
 class UpdateProfileDto {
@@ -67,11 +68,46 @@ class UpdateProfileDto {
   })
   contactNumber?: string | null;
 
+  // The standardized address: names chosen from the PSGC lists, the same
+  // shape Establishment uses. All nullable, so EmptyToNull — clearing a select
+  // clears the column. Whether the names are real and consistent with each
+  // other is checked in the service (`common/ph-address.ts`), which needs all
+  // of them at once; here they are only bounded.
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  region?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  province?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  cityMunicipality?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  barangay?: string | null;
+
+  // House number / street / purok — the one free-text part.
   @IsOptional()
   @EmptyToNull()
   @IsString()
   @MaxLength(255)
-  address?: string | null;
+  streetAddress?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @Matches(/^\d{4}$/, { message: 'postalCode must be exactly 4 digits' })
+  postalCode?: string | null;
 }
 
 // Multipart body: only the text field goes through the DTO. The file itself

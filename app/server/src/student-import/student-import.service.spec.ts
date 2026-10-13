@@ -266,7 +266,7 @@ describe('StudentImportService.commit', () => {
       email: 'student2@example.com',
       // No username column in the template: they sign in with the email.
       username: null,
-      name: 'Ana Maria S Reyes',
+      name: 'Ana Maria S. Reyes',
       role: 'STUDENT',
     });
     // `mustChangePassword` is never sent, so the schema default (true) applies
@@ -278,7 +278,8 @@ describe('StudentImportService.commit', () => {
       studentIdNumber: '2022-00002',
       firstName: 'Ana Maria',
       lastName: 'Reyes',
-      middleInitial: 'S',
+      // The full middle name is stored; the initial is only ever derived.
+      middleName: 'Santos',
       gender: 'Female',
       contactNumber: '09123456789',
       // Resolved by the shared resolveCourseFields: the course's name and the
@@ -292,6 +293,10 @@ describe('StudentImportService.commit', () => {
     expect(insertedStudents[1].dateOfBirth).toEqual(
       new Date('2004-05-17T00:00:00.000Z'),
     );
+    // Derived data and the fixed school name are not columns any more.
+    for (const gone of ['age', 'school', 'middleInitial', 'address']) {
+      expect(Object.keys(insertedStudents[1])).not.toContain(gone);
+    }
     // Linked to the right user even though the insert returned them reversed.
     expect(insertedStudents[0].userId).toBe('user-1');
     expect(insertedStudents[1].userId).toBe('user-2');
@@ -325,7 +330,7 @@ describe('StudentImportService.commit', () => {
     expect(result.credentials![0]).toMatchObject({
       rowNumber: 2,
       studentNumber: '2022-00001',
-      name: 'Juan S Dela Cruz',
+      name: 'Juan S. Dela Cruz',
       loginId: 'student1@example.com',
     });
     expect(

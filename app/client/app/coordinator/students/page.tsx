@@ -70,6 +70,8 @@ function StudentManagementPageContent() {
     formYearLevelOptions,
     formBlocks,
     setField,
+    address,
+    setAddress,
     setCourseField,
     setYearLevelField,
     setSearch,
@@ -239,6 +241,8 @@ function StudentManagementPageContent() {
         blocks={formBlocks}
         statusOptions={STATUS_OPTIONS}
         setField={setField}
+        address={address}
+        setAddress={setAddress}
         onCourseChange={setCourseField}
         onYearLevelChange={setYearLevelField}
         onSubmit={handleSubmit}

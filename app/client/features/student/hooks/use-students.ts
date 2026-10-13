@@ -16,6 +16,8 @@ import {
 } from "@/lib/api/courseApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import { credentialsEmailReason } from "@/lib/api/credentialsEmail";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import { effectivePostalCode } from "@/lib/address/postal-codes";
 
 export const STATUS_OPTIONS: StudentStatus[] = [
   "ACTIVE",
@@ -27,15 +29,21 @@ export const STATUS_OPTIONS: StudentStatus[] = [
 const EMPTY_FORM = {
   studentIdNumber: "",
   firstName: "",
-  middleInitial: "",
+  middleName: "",
   lastName: "",
+  /** "Sex": "" until chosen, then Male or Female. */
+  gender: "" as "" | "Male" | "Female",
   email: "",
   username: "",
   password: "",
-  age: "",
   dateOfBirth: "",
   contactNumber: "",
-  address: "",
+  region: "",
+  province: "",
+  cityMunicipality: "",
+  barangay: "",
+  streetAddress: "",
+  postalCode: "",
   courseId: "",
   courseYearLevel: "",
   blockId: "",
@@ -216,6 +224,28 @@ export function useStudents() {
   };
 
   /**
+   * The address as the shared picker takes it. The form keeps the names under
+   * the student's own column names (`cityMunicipality`, `postalCode`).
+   */
+  const address: AddressValue = {
+    region: form.region,
+    province: form.province,
+    city: form.cityMunicipality,
+    barangay: form.barangay,
+    postalCode: form.postalCode,
+  };
+  const setAddress = (next: AddressValue) => {
+    setForm((f) => ({
+      ...f,
+      region: next.region,
+      province: next.province,
+      cityMunicipality: next.city,
+      barangay: next.barangay,
+      postalCode: next.postalCode,
+    }));
+  };
+
+  /**
    * Blanks go as `null` so an emptied box actually clears the column — the
    * server reads an *absent* field as "leave unchanged", so omitting them
    * would silently restore the old value on every edit.
@@ -226,13 +256,21 @@ export function useStudents() {
   const detailsPayload = () => ({
     firstName: form.firstName || null,
     lastName: form.lastName || null,
-    middleInitial: form.middleInitial || null,
-    age: form.age ? Number(form.age) : null,
+    middleName: form.middleName.trim() || null,
+    gender: form.gender || null,
+    // No age: the server computes it from the date of birth.
     dateOfBirth: form.dateOfBirth
       ? new Date(form.dateOfBirth).toISOString()
       : null,
     contactNumber: form.contactNumber || null,
-    address: form.address || null,
+    region: form.region || null,
+    province: form.province || null,
+    cityMunicipality: form.cityMunicipality || null,
+    barangay: form.barangay || null,
+    streetAddress: form.streetAddress.trim() || null,
+    // The known code for the chosen city where there is one, else what was
+    // typed — never a stale value carried over from an older record.
+    postalCode: effectivePostalCode(address, form.postalCode) || null,
     courseId: form.courseId || null,
     blockId: form.blockId || null,
     courseYearLevel: form.courseYearLevel ? Number(form.courseYearLevel) : null,
@@ -315,18 +353,23 @@ export function useStudents() {
     setForm({
       studentIdNumber: student.studentIdNumber,
       firstName: student.firstName ?? "",
-      middleInitial: student.middleInitial ?? "",
+      middleName: student.middleName ?? "",
       lastName: student.lastName ?? "",
+      gender: student.gender ?? "",
       email: student.user.email,
       // Credentials are not editable here — the fields are disabled in edit
       // mode and these values are only shown for reference.
       username: student.user.username ?? "",
       password: "",
-      age: student.age?.toString() ?? "",
       // <input type="date"> wants yyyy-mm-dd, not a full ISO timestamp.
       dateOfBirth: student.dateOfBirth ? student.dateOfBirth.slice(0, 10) : "",
       contactNumber: student.contactNumber ?? "",
-      address: student.address ?? "",
+      region: student.region ?? "",
+      province: student.province ?? "",
+      cityMunicipality: student.cityMunicipality ?? "",
+      barangay: student.barangay ?? "",
+      streetAddress: student.streetAddress ?? "",
+      postalCode: student.postalCode ?? "",
       courseId: student.courseId ?? "",
       courseYearLevel: student.courseYearLevel?.toString() ?? "",
       blockId: student.blockId ?? "",
@@ -415,6 +458,8 @@ export function useStudents() {
     formBlocks: formBlocks ?? [],
 
     setField,
+    address,
+    setAddress,
     setCourseField,
     setYearLevelField,
     setSearch,

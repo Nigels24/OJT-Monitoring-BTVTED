@@ -285,11 +285,7 @@ export async function buildTemplate(options: TemplateOptions): Promise<Buffer> {
       'Family name. Capitalisation is tidied automatically.',
     ],
     ['First Name', 'Yes', 'Given name(s).'],
-    [
-      'Middle Name',
-      'No',
-      'Full middle name if any. Only the initial is stored.',
-    ],
+    ['Middle Name', 'No', 'Full middle name, if any.'],
     [
       'Sex',
       'Yes',

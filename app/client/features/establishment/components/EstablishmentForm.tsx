@@ -6,34 +6,29 @@ import {
   Mail,
 } from "lucide-react";
 import TextField from "@/components/ui/TextField";
-import TextArea from "@/components/ui/TextArea";
+import AddressPicker from "@/components/ui/AddressPicker";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import type { Establishment } from "@/lib/api/establishmentApi";
+import type { EstablishmentFormValues } from "../hooks/use-establishment";
 import Button from "@/components/ui/Button";
 import SelectField from "@/components/ui/SelectField";
 
 interface EstablishmentFormProps {
-  form: any;
-  editTarget: any;
+  form: EstablishmentFormValues;
+  editTarget: Establishment | null;
   isCreating: boolean;
   isUpdating: boolean;
   error: string;
   industryOptions: string[];
   genderOptions: string[];
-  setField: (key: any) => (e: any) => void;
+  setField: (
+    key: keyof EstablishmentFormValues,
+  ) => (e: { target: { value: string } }) => void;
   onSubmit: (e: React.FormEvent) => void;
   onReset: () => void;
-  // Location props
-  regions: { code: string; name: string }[];
-  provinces: { code: string; name: string }[];
-  municipalities: { code: string; name: string }[];
-  barangays: { code: string; name: string }[];
-  selectedRegion: string;
-  selectedProvince: string;
-  selectedMunicipality: string;
-  selectedBarangay: string;
-  setSelectedRegion: (value: string) => void;
-  setSelectedProvince: (value: string) => void;
-  setSelectedMunicipality: (value: string) => void;
-  setSelectedBarangay: (value: string) => void;
+  /** Region, province, city, barangay and postal code, for the shared picker. */
+  address: AddressValue;
+  setAddress: (next: AddressValue) => void;
 }
 
 export default function EstablishmentForm({
@@ -47,18 +42,8 @@ export default function EstablishmentForm({
   setField,
   onSubmit,
   onReset,
-  regions,
-  provinces,
-  municipalities,
-  barangays,
-  selectedRegion,
-  selectedProvince,
-  selectedMunicipality,
-  selectedBarangay,
-  setSelectedRegion,
-  setSelectedProvince,
-  setSelectedMunicipality,
-  setSelectedBarangay,
+  address,
+  setAddress,
 }: EstablishmentFormProps) {
   return (
     <form onSubmit={onSubmit} className="mt-6 space-y-6 md:space-y-8">
@@ -105,93 +90,11 @@ export default function EstablishmentForm({
             onChange={setField("streetAddress")}
             placeholder="Street building, unit"
           />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Region <span className="text-red-500">*</span>
-            </label>
-            <SelectField
-              value={selectedRegion}
-              onChange={(value) => {
-                setSelectedRegion(value);
-                const regionName =
-                  regions.find((r) => r.code === value)?.name || "";
-                setField("region")({ target: { value: regionName } });
-                setField("province")({ target: { value: "" } });
-                setField("city")({ target: { value: "" } });
-                setField("barangay")({ target: { value: "" } });
-              }}
-              placeholder="Select Region"
-              options={regions.map((r) => ({ label: r.name, value: r.code }))}
-              className="w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Province <span className="text-red-500">*</span>
-            </label>
-            <SelectField
-              value={selectedProvince}
-              onChange={(value) => {
-                setSelectedProvince(value);
-                const provinceName =
-                  provinces.find((p) => p.code === value)?.name || "";
-                setField("province")({ target: { value: provinceName } });
-                setField("city")({ target: { value: "" } });
-                setField("barangay")({ target: { value: "" } });
-              }}
-              placeholder="Select Province"
-              options={provinces.map((p) => ({ label: p.name, value: p.code }))}
-              className="w-full"
-              disabled={!selectedRegion}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              City/Municipality <span className="text-red-500">*</span>
-            </label>
-            <SelectField
-              value={selectedMunicipality}
-              onChange={(value) => {
-                setSelectedMunicipality(value);
-                const cityName =
-                  municipalities.find((m) => m.code === value)?.name || "";
-                setField("city")({ target: { value: cityName } });
-                setField("barangay")({ target: { value: "" } });
-              }}
-              placeholder="Select City/Municipality"
-              options={municipalities.map((m) => ({
-                label: m.name,
-                value: m.code,
-              }))}
-              className="w-full"
-              disabled={!selectedProvince}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Barangay <span className="text-red-500">*</span>
-            </label>
-            <SelectField
-              value={selectedBarangay}
-              onChange={(value) => {
-                setSelectedBarangay(value);
-                const barangayName =
-                  barangays.find((b) => b.code === value)?.name || "";
-                setField("barangay")({ target: { value: barangayName } });
-              }}
-              placeholder="Select Barangay"
-              options={barangays.map((b) => ({ label: b.name, value: b.code }))}
-              className="w-full"
-              disabled={!selectedMunicipality}
-            />
-          </div>
-          <TextField
-            label="Zip Code"
-            labelIcon={MapPin}
-            fieldIcon={MapPin}
-            value={form.zipCode}
-            onChange={setField("zipCode")}
-            placeholder="Zip code"
+          <AddressPicker
+            value={address}
+            onChange={setAddress}
+            required
+            idPrefix="establishment"
           />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">

@@ -27,6 +27,8 @@ import {
 import { buildObjectPath, deleteFile, uploadFile } from '../common/storage';
 import { extensionOf, withSignedUrl } from '../common/signed-url';
 import { GRADED_BY_SELECT } from '../common/assignment-grade';
+import { withAge } from '../common/age';
+import { assertValidAddress } from '../common/ph-address';
 import {
   EVALUATION_INCLUDE,
   withSectionTotals,
@@ -44,12 +46,25 @@ interface SubmitAttendanceInput {
 interface UpdateProfileInput {
   /** `null` = explicitly cleared; `undefined` = not supplied, leave unchanged. */
   contactNumber?: string | null;
-  address?: string | null;
+  region?: string | null;
+  province?: string | null;
+  cityMunicipality?: string | null;
+  barangay?: string | null;
+  streetAddress?: string | null;
+  postalCode?: string | null;
 }
 
 interface UploadCredentialInput {
   type: string;
 }
+
+const ADDRESS_KEYS = [
+  'region',
+  'province',
+  'cityMunicipality',
+  'barangay',
+  'postalCode',
+] as const;
 
 /** Exported so the client's dropdown offers exactly these — no Prisma enum, no migration. */
 export const CREDENTIAL_TYPES = [
@@ -66,6 +81,8 @@ export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
 const PROFILE_INCLUDE = {
   user: { select: { id: true, email: true, name: true } },
   establishment: { select: { id: true, name: true } },
+  enrolledCourse: { select: { id: true, code: true, name: true } },
+  block: { select: { id: true, name: true } },
 } as const;
 
 @Injectable()
@@ -148,7 +165,7 @@ export class StudentService {
       : ZERO_ASSIGNMENT_PROGRESS;
 
     return {
-      ...profile,
+      ...withAge(profile),
       assessment: await this.getAssessment(student.id),
       stats: {
         hasActiveAssignment: activeAssignment !== null,
@@ -432,16 +449,33 @@ export class StudentService {
     if (!student) {
       throw new NotFoundException('Student profile not found');
     }
-    return student;
+    // `age` is derived from the date of birth here, read-only — it is not a
+    // column and cannot be sent back.
+    return withAge(student);
   }
 
   async updateProfile(userId: string, data: UpdateProfileInput) {
     const student = await this.getStudentByUserId(userId);
-    return this.prisma.client.student.update({
+
+    // Checked as the address will stand after this update — see
+    // CoordinatorService.updateStudent for the same merge.
+    if (ADDRESS_KEYS.some((key) => data[key] !== undefined)) {
+      assertValidAddress(
+        Object.fromEntries(
+          ADDRESS_KEYS.map((key) => [
+            key,
+            data[key] === undefined ? student[key] : data[key],
+          ]),
+        ),
+      );
+    }
+
+    const updated = await this.prisma.client.student.update({
       where: { id: student.id },
       data,
       include: PROFILE_INCLUDE,
     });
+    return withAge(updated);
   }
 
   /**

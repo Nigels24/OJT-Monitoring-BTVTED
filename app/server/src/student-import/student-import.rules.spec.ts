@@ -3,10 +3,8 @@ import {
   ImportColumnKey,
   ImportContext,
   RawImportRow,
-  ageOn,
   countRows,
   matchHeaders,
-  middleInitialFrom,
   normaliseContactNumber,
   normaliseEmail,
   normaliseHeader,
@@ -165,15 +163,6 @@ describe('normalisers', () => {
     }
   });
 
-  it('middleInitialFrom keeps the first letter, upper-cased', () => {
-    expect(middleInitialFrom('santos')).toBe('S');
-    expect(middleInitialFrom(' de la Paz')).toBe('D');
-    expect(middleInitialFrom('ñ.')).toBe('Ñ');
-    expect(middleInitialFrom('')).toBeNull();
-    expect(middleInitialFrom(null)).toBeNull();
-    expect(middleInitialFrom('-')).toBeNull();
-  });
-
   describe('parseBirthdate', () => {
     const iso = (value: unknown) => parseBirthdate(value)?.toISOString();
 
@@ -212,13 +201,6 @@ describe('normalisers', () => {
     });
   });
 
-  it('ageOn counts completed years, to the day', () => {
-    const born = new Date('2004-10-13T00:00:00.000Z');
-    expect(ageOn(born, new Date('2026-10-13T00:00:00.000Z'))).toBe(22);
-    expect(ageOn(born, new Date('2026-10-12T00:00:00.000Z'))).toBe(21);
-    expect(ageOn(born, new Date('2027-01-01T00:00:00.000Z'))).toBe(22);
-  });
-
   it('parseYearLevel accepts whole numbers only', () => {
     expect(parseYearLevel(4)).toBe(4);
     expect(parseYearLevel('4')).toBe(4);
@@ -252,7 +234,6 @@ describe('validateRows — a valid row', () => {
         lastName: 'Dela Cruz',
         firstName: 'Juan',
         middleName: 'Santos',
-        middleInitial: 'S',
         sex: 'Male',
         birthdate: '2004-05-17',
         age: 22,
@@ -271,7 +252,7 @@ describe('validateRows — a valid row', () => {
       context(),
     );
     expect(result.status).toBe('VALID');
-    expect(result.values.middleInitial).toBeNull();
+    expect(result.values.middleName).toBe('');
     expect(result.values.contactNumber).toBe('');
   });
 
@@ -283,6 +264,15 @@ describe('validateRows — a valid row', () => {
     expect(result.status).toBe('VALID');
     expect(result.values.courseId).toBe('course-chs');
     expect(result.values.course).toBe('BTVTED-CHS');
+  });
+
+  it('keeps the full middle name, title-cased — not just an initial', () => {
+    const [result] = validateRows(
+      [row(2, { middleName: '  de la  PAZ ' })],
+      context(),
+    );
+    expect(result.values.middleName).toBe('De La Paz');
+    expect(Object.keys(result.values)).not.toContain('middleInitial');
   });
 
   it('computes age from the birthdate — there is no age cell to read', () => {

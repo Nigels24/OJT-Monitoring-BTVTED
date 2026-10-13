@@ -4,8 +4,18 @@ import {
   useUpdateMyProfileMutation,
 } from "@/lib/api/studentPortalApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import { effectivePostalCode } from "@/lib/address/postal-codes";
 
-const EMPTY_FORM = { contactNumber: "", address: "" };
+const EMPTY_FORM = {
+  contactNumber: "",
+  region: "",
+  province: "",
+  cityMunicipality: "",
+  barangay: "",
+  streetAddress: "",
+  postalCode: "",
+};
 
 export type ProfileFormValues = typeof EMPTY_FORM;
 
@@ -24,6 +34,25 @@ export function useProfile() {
       setForm((f) => ({ ...f, [key]: e.target.value }));
     };
 
+  /** The address as the shared picker takes it. */
+  const address: AddressValue = {
+    region: form.region,
+    province: form.province,
+    city: form.cityMunicipality,
+    barangay: form.barangay,
+    postalCode: form.postalCode,
+  };
+  const setAddress = (next: AddressValue) => {
+    setForm((f) => ({
+      ...f,
+      region: next.region,
+      province: next.province,
+      cityMunicipality: next.city,
+      barangay: next.barangay,
+      postalCode: next.postalCode,
+    }));
+  };
+
   // Seeded from the loaded record only at the moment editing starts, rather
   // than synced via an effect — the student's in-progress edits shouldn't be
   // clobbered by a background refetch.
@@ -31,7 +60,12 @@ export function useProfile() {
     if (!data) return;
     setForm({
       contactNumber: data.contactNumber ?? "",
-      address: data.address ?? "",
+      region: data.region ?? "",
+      province: data.province ?? "",
+      cityMunicipality: data.cityMunicipality ?? "",
+      barangay: data.barangay ?? "",
+      streetAddress: data.streetAddress ?? "",
+      postalCode: data.postalCode ?? "",
     });
     setError("");
     setIsEditing(true);
@@ -50,7 +84,14 @@ export function useProfile() {
       // `null`, not omitted — an emptied box must clear the stored value.
       await updateProfile({
         contactNumber: form.contactNumber || null,
-        address: form.address || null,
+        region: form.region || null,
+        province: form.province || null,
+        cityMunicipality: form.cityMunicipality || null,
+        barangay: form.barangay || null,
+        streetAddress: form.streetAddress.trim() || null,
+        // The known code for the chosen city where there is one, else what
+        // was typed.
+        postalCode: effectivePostalCode(address, form.postalCode) || null,
       }).unwrap();
 
       setIsEditing(false);
@@ -70,6 +111,8 @@ export function useProfile() {
     error,
     isEditing,
     isSubmitting,
+    address,
+    setAddress,
 
     setField,
     startEditing,

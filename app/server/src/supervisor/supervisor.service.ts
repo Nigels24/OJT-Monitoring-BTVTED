@@ -807,7 +807,6 @@ export const EVALUATION_INCLUDE = {
       id: true,
       studentIdNumber: true,
       course: true,
-      school: true,
       user: { select: { name: true, email: true } },
       establishment: { select: { id: true, name: true } },
     },

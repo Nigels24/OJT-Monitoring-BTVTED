@@ -1,6 +1,7 @@
 import { Phone, MapPin, Save, X } from "lucide-react";
 import TextField from "@/components/ui/TextField";
-import TextArea from "@/components/ui/TextArea";
+import AddressPicker from "@/components/ui/AddressPicker";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
 import Button from "@/components/ui/Button";
 import type { ProfileFormValues } from "../hooks/use-profile";
 
@@ -11,6 +12,9 @@ interface ProfileEditFormProps {
   setField: (
     key: keyof ProfileFormValues,
   ) => (e: { target: { value: string } }) => void;
+  /** Region, province, city, barangay and postal code, for the shared picker. */
+  address: AddressValue;
+  setAddress: (next: AddressValue) => void;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }
@@ -20,6 +24,8 @@ export default function ProfileEditForm({
   error,
   isSubmitting,
   setField,
+  address,
+  setAddress,
   onSubmit,
   onCancel,
 }: ProfileEditFormProps) {
@@ -34,15 +40,23 @@ export default function ProfileEditForm({
         onChange={setField("contactNumber")}
       />
 
-      <TextArea
-        label="Address"
-        labelIcon={MapPin}
-        fieldIcon={MapPin}
-        value={form.address}
-        onChange={setField("address")}
-        placeholder="House no., street, barangay, city"
-        rows={3}
-      />
+      {/* The picker renders one cell per field; here they simply stack. */}
+      <div className="grid grid-cols-1 gap-4">
+        <AddressPicker
+          value={address}
+          onChange={setAddress}
+          idPrefix="profile"
+        />
+        <TextField
+          label="House No. / Street (optional)"
+          labelIcon={MapPin}
+          fieldIcon={MapPin}
+          value={form.streetAddress}
+          onChange={setField("streetAddress")}
+          placeholder="House no., street, purok"
+          maxLength={255}
+        />
+      </div>
 
       <p className="text-xs text-gray-500">
         Only your contact number and address can be updated here. Everything

@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — eleven spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — fifteen spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -232,10 +232,24 @@ The coordinator downloads a template, fills one row per student, uploads it, rea
 
 - Commit is all-or-nothing for the valid rows: if the insert fails (a concurrent add) the transaction rolls back and it answers 409.
 - **Logins (§16):** with mail configured the emails are queued *after* the commit and not awaited (`queueStudentCredentials` → `CredentialsEmailService.deliverBatch`), each outcome written to its user row as it is sent; no password is in the response. With mail off, every created account is marked `NOT_CONFIGURED` and the response carries each login ID and one-time password, once.
-- Middle Name → `middleInitialFrom` (the single place for that mapping); Sex → `Student.gender`; age is computed from Birthdate, never read from the file; Course matches an **active** course by code or name; Year Level must have a `CourseRequirement` for that course, as single-add requires. An optional `blockId` applies to every row and rejects rows whose course/year it does not match.
+- Middle Name is stored in full (`Student.middleName`, §18); Sex → `Student.gender`; age is computed from Birthdate via `common/age.ts` for the 15–70 check and the preview only — it is not stored; Course matches an **active** course by code or name; Year Level must have a `CourseRequirement` for that course, as single-add requires. An optional `blockId` applies to every row and rejects rows whose course/year it does not match.
 - The audit log line carries the coordinator id and counts only. Never log row contents — an insert error can quote the conflicting value, so only its name is logged.
 
 Client: `features/student-import/` (hook + dialog), endpoints on `studentApi`. The template download is turned into an object URL inside the endpoint so no Blob enters the store; the rejected-rows CSV is built client-side.
+
+### 18. Student record: computed age, names, and the standardized address
+
+The student record holds only what OJT monitoring needs. Three rules, each with one home:
+
+- **Age is derived, never stored or typed.** There is no `Student.age` column. `src/common/age.ts` (`ageOn`, `computeAge`, `withAge`) computes it from `dateOfBirth` as of `manilaToday()` and every student response carries it read-only (`listStudents`, `updateStudent`, `/student/profile`, `/student/dashboard`). No DTO accepts an `age`, so `forbidNonWhitelisted` rejects one. The client only displays it (`formatAge`).
+- **Names are three parts; the initial is derived.** `Student.middleName` is the full middle name (it replaced `middleInitial`; the migration carried old values over). `src/common/person-name.ts` — mirrored at `app/client/lib/person-name.ts`, keep them identical — builds `User.name` ("Juan S. Dela Cruz") and "Dela Cruz, Juan S.". `updateStudent` recomposes `User.name` from the merged parts. "Sex" (Male/Female) is the UI name for the `gender` column.
+- **No `school` column** — one fixed school (`common/school.ts`). The only free-text address left is `legacyAddress` (the old `address`, renamed): read-only, shown where no structured address exists, **never written**.
+
+**Address.** `region`, `province`, `cityMunicipality`, `barangay`, `streetAddress`, `postalCode` — names, like Establishment's. `src/common/ph-address.ts` (`addressProblems`/`assertValidAddress`) checks the names form a real chain (province in region, city in province, barangay in city; partial top-down is fine) against the address *as it will stand after the update*. It is mirrored at `app/client/lib/address/ph-locations.ts`; the logic both must share is `provinceGroupsOf`: the PSGC data files independent cities (Zamboanga City, Isabela City, all of Metro Manila…) under a parent that is not a province, so they are surfaced as extra province-level entries or they cannot be picked at all.
+
+**Postal codes** are static data keyed by PSGC city/municipality code — the package has none. `app/client/lib/address/postal-codes.*.json` with **`SOURCES.md` beside them stating coverage and provenance**; the server's copy is `src/common/postal-codes.data.ts` and `postal-codes.spec.ts` fails if the two differ. Where a city has a known code the picker fills it in and locks it, and the server rejects a different one; where none is known the field is typed (any 4 digits). Never add a code that is not sourced — an unmapped place is a supported state, a wrong code is not. Region IX is *not* from PHLPost (its page omits the region) but from cross-checked secondary sources; see `SOURCES.md`.
+
+The deprecated assignment mirrors on `Student` (§10) are untouched by this.
 
 ### Client
 
@@ -252,6 +266,6 @@ Every route under `app/coordinator/`, `app/student/`, `app/supervisor/` is a rea
 
 The school name is a fixed constant duplicated in `app/server/src/common/school.ts` and `app/client/lib/school.ts` (the projects share no code) — keep the two identical and never make it a setting.
 
-Philippine region/province/city/barangay dropdowns come from `@aivangogh/ph-address`, keyed by PSGC code. The DB stores **names**, not codes, so `useEstablishment.handleEdit` does a reverse name→code lookup and sets `isPopulatingRef` to stop the cascade effects from clearing the children it just restored; a `useEffect` on `editTarget` clears the flag afterwards. Touch that flag carefully.
+Philippine region/province/city/barangay dropdowns come from `@aivangogh/ph-address`, keyed by PSGC code, through the one shared picker (§18): `lib/hooks/use-address-picker.ts` + `components/ui/AddressPicker.tsx`. The DB stores **names**, not codes, and the picker resolves its lists from the names on every render — there is no second copy of the selection held as codes, so the old `isPopulatingRef`/cascade-effect dance in `useEstablishment` is gone. Don't reintroduce selection state as codes.
 
 `app/client/AGENTS.md` is regenerated by `next dev` — commit it, don't revert it. Next 16 has breaking changes relative to older releases; read the relevant guide in `app/client/node_modules/next/dist/docs/` before writing Next code.

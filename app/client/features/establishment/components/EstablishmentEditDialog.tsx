@@ -1,29 +1,24 @@
 import { Building2, X } from "lucide-react";
 import EstablishmentForm from "./EstablishmentForm";
 import Overlay from "@/components/ui/Overlay";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import type { Establishment } from "@/lib/api/establishmentApi";
+import type { EstablishmentFormValues } from "../hooks/use-establishment";
 
 interface EstablishmentEditDialogProps {
   open: boolean;
-  form: any;
-  editTarget: any;
+  form: EstablishmentFormValues;
+  editTarget: Establishment | null;
   isCreating: boolean;
   isUpdating: boolean;
   error: string;
   industryOptions: string[];
   genderOptions: string[];
-  regions: { code: string; name: string }[];
-  provinces: { code: string; name: string }[];
-  municipalities: { code: string; name: string }[];
-  barangays: { code: string; name: string }[];
-  selectedRegion: string;
-  selectedProvince: string;
-  selectedMunicipality: string;
-  selectedBarangay: string;
-  setSelectedRegion: (value: string) => void;
-  setSelectedProvince: (value: string) => void;
-  setSelectedMunicipality: (value: string) => void;
-  setSelectedBarangay: (value: string) => void;
-  setField: (key: any) => (e: any) => void;
+  address: AddressValue;
+  setAddress: (next: AddressValue) => void;
+  setField: (
+    key: keyof EstablishmentFormValues,
+  ) => (e: { target: { value: string } }) => void;
   onSubmit: (e: React.FormEvent) => void;
   onReset: () => void;
   onClose: () => void;
@@ -38,18 +33,8 @@ export default function EstablishmentEditDialog({
   error,
   industryOptions,
   genderOptions,
-  regions,
-  provinces,
-  municipalities,
-  barangays,
-  selectedRegion,
-  selectedProvince,
-  selectedMunicipality,
-  selectedBarangay,
-  setSelectedRegion,
-  setSelectedProvince,
-  setSelectedMunicipality,
-  setSelectedBarangay,
+  address,
+  setAddress,
   setField,
   onSubmit,
   onReset,
@@ -95,18 +80,8 @@ export default function EstablishmentEditDialog({
             setField={setField}
             onSubmit={onSubmit}
             onReset={onReset}
-            regions={regions}
-            provinces={provinces}
-            municipalities={municipalities}
-            barangays={barangays}
-            selectedRegion={selectedRegion}
-            selectedProvince={selectedProvince}
-            selectedMunicipality={selectedMunicipality}
-            selectedBarangay={selectedBarangay}
-            setSelectedRegion={setSelectedRegion}
-            setSelectedProvince={setSelectedProvince}
-            setSelectedMunicipality={setSelectedMunicipality}
-            setSelectedBarangay={setSelectedBarangay}
+            address={address}
+            setAddress={setAddress}
           />
         </div>
       </div>

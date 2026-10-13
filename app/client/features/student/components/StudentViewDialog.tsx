@@ -18,6 +18,8 @@ import Button from "@/components/ui/Button";
 import { Student } from "@/lib/api/studentApi";
 import { formatDateOnly } from "@/lib/format";
 import { SCHOOL_NAME } from "@/lib/school";
+import { formatAge, formatLastFirst } from "@/lib/person-name";
+import { formatAddress } from "@/lib/address/ph-locations";
 import TrainingAssignmentsPanel from "./TrainingAssignmentsPanel";
 
 interface StudentViewDialogProps {
@@ -49,8 +51,14 @@ export default function StudentViewDialog({
               icon={IdCard}
             />
             <DetailItem
-              label="Full Name"
-              value={student.user.name}
+              label="Name"
+              value={
+                formatLastFirst({
+                  lastName: student.lastName,
+                  firstName: student.firstName,
+                  middleName: student.middleName,
+                }) || student.user.name
+              }
               icon={User}
             />
             <DetailItem
@@ -63,15 +71,35 @@ export default function StudentViewDialog({
               value={student.contactNumber}
               icon={Phone}
             />
-            <DetailItem label="Age" value={student.age} icon={User} />
+            <DetailItem label="Sex" value={student.gender} icon={User} />
             <DetailItem
               label="Date of Birth"
-              value={formatDateOnly(student.dateOfBirth, "")|| null}
+              // The age is computed by the server from this date — shown, never
+              // entered.
+              value={
+                [
+                  formatDateOnly(student.dateOfBirth, ""),
+                  formatAge(student.age),
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || null
+              }
               icon={CalendarDays}
             />
             <DetailItem
               label="Address"
-              value={student.address}
+              value={
+                formatAddress({
+                  streetAddress: student.streetAddress,
+                  barangay: student.barangay,
+                  city: student.cityMunicipality,
+                  province: student.province,
+                  region: student.region,
+                  postalCode: student.postalCode,
+                }) ||
+                // An older record, entered before the address was structured.
+                student.legacyAddress
+              }
               icon={MapPin}
               className="md:col-span-2"
             />

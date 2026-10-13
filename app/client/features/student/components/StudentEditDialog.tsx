@@ -4,6 +4,7 @@ import { Student, StudentStatus } from "@/lib/api/studentApi";
 import { Establishment } from "@/lib/api/establishmentApi";
 import { Block, Course } from "@/lib/api/courseApi";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
 import Overlay from "@/components/ui/Overlay";
 
 interface StudentEditDialogProps {
@@ -21,6 +22,8 @@ interface StudentEditDialogProps {
   setField: (
     key: keyof StudentFormValues,
   ) => (e: { target: { value: string } }) => void;
+  address: AddressValue;
+  setAddress: (next: AddressValue) => void;
   onCourseChange: (value: string) => void;
   onYearLevelChange: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -40,6 +43,8 @@ export default function StudentEditDialog({
   blocks,
   statusOptions,
   setField,
+  address,
+  setAddress,
   onCourseChange,
   onYearLevelChange,
   onSubmit,
@@ -84,6 +89,8 @@ export default function StudentEditDialog({
             blocks={blocks}
             statusOptions={statusOptions}
             setField={setField}
+            address={address}
+            setAddress={setAddress}
             onCourseChange={onCourseChange}
             onYearLevelChange={onYearLevelChange}
             onSubmit={onSubmit}

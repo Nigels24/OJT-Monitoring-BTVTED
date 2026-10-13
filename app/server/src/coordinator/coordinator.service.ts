@@ -41,7 +41,9 @@ import {
   deleteSupervisorCascade,
 } from '../common/cascade-delete';
 import { deleteFile } from '../common/storage';
-import { SCHOOL_NAME } from '../common/school';
+import { withAge } from '../common/age';
+import { formatFullName } from '../common/person-name';
+import { assertValidAddress } from '../common/ph-address';
 import { generateTemporaryPassword } from '../common/temp-password';
 import { NotificationService } from '../notification/notification.service';
 import { OverdueSweepService } from '../notification/overdue-sweep.service';
@@ -66,14 +68,17 @@ export interface StudentDetails {
   name?: string;
   firstName?: string | null;
   lastName?: string | null;
-  middleInitial?: string | null;
-  /** Not on the coordinator's form; set by the Excel import ("Sex"). */
+  middleName?: string | null;
+  /** "Sex" on the form and in the Excel import: Male or Female. */
   gender?: string | null;
-  age?: number | null;
   dateOfBirth?: string | null;
-  school?: string | null;
   contactNumber?: string | null;
-  address?: string | null;
+  region?: string | null;
+  province?: string | null;
+  cityMunicipality?: string | null;
+  barangay?: string | null;
+  streetAddress?: string | null;
+  postalCode?: string | null;
   course?: string | null;
   yearLevel?: string | null;
   courseId?: string | null;
@@ -361,6 +366,10 @@ export class CoordinatorService {
       );
     }
 
+    // The address names must be real and consistent with each other — the
+    // pickers only offer valid combinations, but the request is not the form.
+    assertValidAddress(data);
+
     const profile = await this.resolveCourseFields(data, null, null, lookup);
 
     // See createSupervisor's comment: omitted password -> generated one;
@@ -415,7 +424,6 @@ export class CoordinatorService {
       data: accounts.map((account) => ({
         userId: userByEmail.get(account.email)!.id,
         studentIdNumber: account.studentIdNumber,
-        school: SCHOOL_NAME,
         ...studentProfileData(account.profile),
       })),
     });
@@ -673,7 +681,7 @@ export class CoordinatorService {
       students: students.map(({ trainingAssignments, ...student }, index) => {
         const progress = progressByStudent[index];
         return {
-          ...student,
+          ...withAge(student),
           hasActiveAssignment: trainingAssignments.length > 0,
           // Kept at top level, not just inside `progress`, so the existing
           // client types (studentApi.ts) that already read these two fields
@@ -1284,13 +1292,33 @@ export class CoordinatorService {
       throw new NotFoundException('Student not found');
     }
 
-    // Name lives on User, everything else on Student.
-    const fullName = buildFullName(data, null);
-    if (fullName) {
-      await this.prisma.client.user.update({
-        where: { id: student.userId },
-        data: { name: fullName },
-      });
+    // Checked as the address will stand after this update: a request may
+    // carry only some of the parts, and they have to agree with the rest.
+    if (ADDRESS_KEYS.some((key) => data[key] !== undefined)) {
+      assertValidAddress(mergeAddress(student, data));
+    }
+
+    // Name lives on User, everything else on Student. Recomposed from the
+    // parts as they will stand, so changing only the middle name still
+    // updates the display name.
+    if (NAME_KEYS.some((key) => data[key] !== undefined)) {
+      const fullName = buildFullName(
+        {
+          firstName: data.firstName ?? student.firstName,
+          lastName: data.lastName ?? student.lastName,
+          middleName:
+            data.middleName === undefined
+              ? student.middleName
+              : data.middleName,
+        },
+        null,
+      );
+      if (fullName) {
+        await this.prisma.client.user.update({
+          where: { id: student.userId },
+          data: { name: fullName },
+        });
+      }
     }
 
     const resolved = await this.resolveCourseFields(
@@ -1299,7 +1327,7 @@ export class CoordinatorService {
       student.courseYearLevel,
     );
 
-    return this.prisma.client.student.update({
+    const updated = await this.prisma.client.student.update({
       where: { id: studentId },
       data: studentProfileData(resolved),
       include: {
@@ -1307,6 +1335,7 @@ export class CoordinatorService {
         establishment: { select: { id: true, name: true } },
       },
     });
+    return withAge(updated);
   }
 
   /**
@@ -1986,6 +2015,33 @@ const ACCOUNT_SELECT = {
   credentialsEmailError: true,
 } as const;
 
+const NAME_KEYS = ['firstName', 'lastName', 'middleName'] as const;
+
+const ADDRESS_KEYS = [
+  'region',
+  'province',
+  'cityMunicipality',
+  'barangay',
+  'postalCode',
+] as const;
+
+/**
+ * The address as it will read once an update is applied: each part taken from
+ * the request where the request has it (`null` = cleared), and from the stored
+ * row otherwise.
+ */
+export function mergeAddress(
+  stored: Record<(typeof ADDRESS_KEYS)[number], string | null>,
+  incoming: Partial<Record<(typeof ADDRESS_KEYS)[number], string | null>>,
+) {
+  return Object.fromEntries(
+    ADDRESS_KEYS.map((key) => [
+      key,
+      incoming[key] === undefined ? stored[key] : incoming[key],
+    ]),
+  ) as Record<(typeof ADDRESS_KEYS)[number], string | null>;
+}
+
 const MS_PER_WEEK = 7 * MS_PER_DAY;
 
 /** Monday 00:00 UTC, `weeksAgo` weeks back from the current week. */
@@ -2069,23 +2125,25 @@ function ordinalYearLabel(n: number): string {
 }
 
 /**
- * Shared create/update fields. `school` is deliberately excluded — the school
- * is permanent (`SCHOOL_NAME`), never client-editable. `createStudent` sets it
- * explicitly; `updateStudent` never touches the column at all, so any
- * `school` value in the request body is silently ignored rather than
- * rejected (`StudentDetailsDto` still declares the field so a client that
- * sends it isn't 400'd by `forbidNonWhitelisted`).
+ * Shared create/update fields — the columns a student record actually has.
+ * There is no `age` (derived from `dateOfBirth`, see `common/age.ts`), no
+ * `school` (one fixed school, `common/school.ts`) and no free-text `address`
+ * (the old one survives read-only as `legacyAddress` and is never written).
  */
 function studentProfileData(data: StudentDetails) {
   return {
     firstName: data.firstName,
     lastName: data.lastName,
-    middleInitial: data.middleInitial,
+    middleName: data.middleName,
     gender: data.gender,
-    age: data.age,
     dateOfBirth: toNullableDate(data.dateOfBirth),
     contactNumber: data.contactNumber,
-    address: data.address,
+    region: data.region,
+    province: data.province,
+    cityMunicipality: data.cityMunicipality,
+    barangay: data.barangay,
+    streetAddress: data.streetAddress,
+    postalCode: data.postalCode,
     // DEPRECATED, but still written: `resolveCourseFields` derives fresh
     // values for both from courseId/blockId/courseYearLevel when those are
     // sent, so screens still reading these two columns keep rendering
@@ -2112,11 +2170,9 @@ function buildFullName(
   data: StudentDetails,
   fallback: string | null = '',
 ): string | null {
-  const parts = [data.firstName, data.middleInitial, data.lastName]
-    .map((part) => part?.trim())
-    .filter(Boolean);
-
-  if (parts.length > 0) return parts.join(' ');
+  // "Juan S. Dela Cruz" — the middle name contributes its initial only.
+  const composed = formatFullName(data);
+  if (composed) return composed;
   if (data.name?.trim()) return data.name.trim();
   return fallback;
 }

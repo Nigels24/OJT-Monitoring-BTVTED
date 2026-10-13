@@ -337,11 +337,10 @@ export class StudentImportService {
                 studentIdNumber: values.studentNumber,
                 firstName: values.firstName,
                 lastName: values.lastName,
-                middleInitial: values.middleInitial,
+                middleName: values.middleName || null,
                 gender: values.sex,
+                // Age is not sent: it is derived from this date on read.
                 dateOfBirth: values.birthdate,
-                // Computed from the birthdate, never read from the file.
-                age: values.age,
                 contactNumber: values.contactNumber || null,
                 courseId: values.courseId,
                 courseYearLevel: values.yearLevel,

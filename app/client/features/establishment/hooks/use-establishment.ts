@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import {
   useGetEstablishmentsQuery,
   useCreateEstablishmentMutation,
@@ -7,18 +7,8 @@ import {
   Establishment,
 } from "@/lib/api/establishmentApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
-import {
-  getAllRegions,
-  getProvincesByRegion,
-  getMunicipalitiesByProvince,
-  getBarangaysByMunicipality,
-} from "@aivangogh/ph-address";
-import type {
-  PHRegion,
-  PHProvince,
-  PHMunicipality,
-  PHBarangay,
-} from "@aivangogh/ph-address";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import { effectivePostalCode } from "@/lib/address/postal-codes";
 
 const INDUSTRY_OPTIONS = [
   "Information Technology",
@@ -56,10 +46,7 @@ const EMPTY_FORM = {
   coordinatorEmail: "",
 };
 
-interface LocationOption {
-  code: string;
-  name: string;
-}
+export type EstablishmentFormValues = typeof EMPTY_FORM;
 
 export function useEstablishment() {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -72,23 +59,6 @@ export function useEstablishment() {
   const [page, setPage] = useState(1);
   const { showSuccess, showError } = useSnackbar();
 
-  // Location state
-  const [regions, setRegions] = useState<LocationOption[]>([]);
-  const [provinces, setProvinces] = useState<LocationOption[]>([]);
-  const [municipalities, setMunicipalities] = useState<LocationOption[]>([]);
-  const [barangays, setBarangays] = useState<LocationOption[]>([]);
-  const [selectedRegion, setSelectedRegion] = useState<string>("");
-  const [selectedProvince, setSelectedProvince] = useState<string>("");
-  const [selectedMunicipality, setSelectedMunicipality] = useState<string>("");
-  const [selectedBarangay, setSelectedBarangay] = useState<string>("");
-
-  // When true, the location-cascade effects below skip their "reset children"
-  // step. handleEdit sets this before programmatically restoring a saved
-  // region/province/municipality/barangay, so the cascade effects (which
-  // normally clear children when a user picks a new parent) don't wipe out
-  // the values we just restored.
-  const isPopulatingRef = useRef(false);
-
   const { data: establishments, isLoading } = useGetEstablishmentsQuery();
   const [createEstablishment, { isLoading: isCreating }] =
     useCreateEstablishmentMutation();
@@ -96,83 +66,34 @@ export function useEstablishment() {
     useUpdateEstablishmentMutation();
   const [deleteEstablishment] = useDeleteEstablishmentMutation();
 
-  // Load all regions on mount
-  useEffect(() => {
-    const allRegions = getAllRegions();
-    setRegions(
-      allRegions.map((r: PHRegion) => ({
-        code: r.psgcCode,
-        name: r.name,
-      })),
-    );
-  }, []);
+  const setField =
+    (key: keyof EstablishmentFormValues) =>
+    (e: { target: { value: string } }) =>
+      setForm((f) => ({ ...f, [key]: e.target.value }));
 
-  // Load provinces when region changes
-  useEffect(() => {
-    if (selectedRegion) {
-      const provinceList = getProvincesByRegion(selectedRegion);
-      setProvinces(
-        provinceList.map((p: PHProvince) => ({
-          code: p.psgcCode,
-          name: p.name,
-        })),
-      );
-    } else {
-      setProvinces([]);
-    }
-    if (!isPopulatingRef.current) {
-      setSelectedProvince("");
-      setSelectedMunicipality("");
-      setSelectedBarangay("");
-    }
-  }, [selectedRegion]);
-
-  // Load municipalities when province changes
-  useEffect(() => {
-    if (selectedProvince) {
-      const municipalityList = getMunicipalitiesByProvince(selectedProvince);
-      setMunicipalities(
-        municipalityList.map((m: PHMunicipality) => ({
-          code: m.psgcCode,
-          name: m.name,
-        })),
-      );
-    } else {
-      setMunicipalities([]);
-    }
-    if (!isPopulatingRef.current) {
-      setSelectedMunicipality("");
-      setSelectedBarangay("");
-    }
-  }, [selectedProvince]);
-
-  // Load barangays when municipality changes
-  useEffect(() => {
-    if (selectedMunicipality) {
-      const barangayList = getBarangaysByMunicipality(selectedMunicipality);
-      setBarangays(
-        barangayList.map((b: PHBarangay) => ({
-          code: b.psgcCode,
-          name: b.name,
-        })),
-      );
-    } else {
-      setBarangays([]);
-    }
-    if (!isPopulatingRef.current) {
-      setSelectedBarangay("");
-    }
-  }, [selectedMunicipality]);
-
-  // Once the state set by handleEdit has been committed and the cascade
-  // effects above have run (and skipped their resets), turn the flag back off
-  // so normal user interaction resets children as expected again.
-  useEffect(() => {
-    isPopulatingRef.current = false;
-  }, [editTarget]);
-
-  const setField = (key: keyof typeof form) => (e: any) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+  /**
+   * The address as the shared picker takes it. The form keeps the four names
+   * and the postal code under the establishment's own column names; nothing
+   * else is held — no PSGC codes, and so nothing to keep in step with them.
+   */
+  const address: AddressValue = {
+    region: form.region,
+    province: form.province,
+    city: form.city,
+    barangay: form.barangay,
+    postalCode: form.zipCode,
+  };
+  const setAddress = (next: AddressValue) =>
+    setForm((f) => ({
+      ...f,
+      region: next.region,
+      province: next.province,
+      city: next.city,
+      barangay: next.barangay,
+      zipCode: next.postalCode,
+    }));
+  /** The known postal code for the chosen city, else what was typed. */
+  const zipCode = () => effectivePostalCode(address, form.zipCode) || undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -189,7 +110,7 @@ export function useEstablishment() {
           barangay: form.barangay || undefined,
           city: form.city || undefined,
           province: form.province || undefined,
-          zipCode: form.zipCode || undefined,
+          zipCode: zipCode(),
           status: form.status,
           coordinatorFirstName: form.coordinatorFirstName || undefined,
           coordinatorLastName: form.coordinatorLastName || undefined,
@@ -207,12 +128,13 @@ export function useEstablishment() {
         setIsDialogOpen(false);
         showSuccess(`"${form.name}" has been created successfully.`);
       }
-    } catch (err: any) {
-      const errorMessage =
-        err?.data?.message ||
-        (editTarget
+    } catch (err: unknown) {
+      const errorMessage = readError(
+        err,
+        editTarget
           ? "Failed to update establishment."
-          : "Failed to create establishment.");
+          : "Failed to create establishment.",
+      );
       setError(errorMessage);
       showError(errorMessage);
     }
@@ -232,7 +154,7 @@ export function useEstablishment() {
         barangay: form.barangay || undefined,
         city: form.city || undefined,
         province: form.province || undefined,
-        zipCode: form.zipCode || undefined,
+        zipCode: zipCode(),
         status: form.status,
         coordinatorFirstName: form.coordinatorFirstName || undefined,
         coordinatorLastName: form.coordinatorLastName || undefined,
@@ -250,9 +172,8 @@ export function useEstablishment() {
       setForm(EMPTY_FORM);
       setIsDialogOpen(false);
       showSuccess(`"${form.name}" has been updated successfully.`);
-    } catch (err: any) {
-      const errorMessage =
-        err?.data?.message || "Failed to update establishment.";
+    } catch (err: unknown) {
+      const errorMessage = readError(err, "Failed to update establishment.");
       setError(errorMessage);
       showError(errorMessage);
     }
@@ -264,9 +185,8 @@ export function useEstablishment() {
       await deleteEstablishment(deleteTarget.id).unwrap();
       setDeleteTarget(null);
       showSuccess(`"${deleteTarget.name}" has been deleted successfully.`);
-    } catch (err: any) {
-      const errorMessage =
-        err?.data?.message || err?.message || "Failed to delete establishment.";
+    } catch (err: unknown) {
+      const errorMessage = readError(err, "Failed to delete establishment.");
       setError(errorMessage);
       showError(errorMessage);
     }
@@ -277,90 +197,9 @@ export function useEstablishment() {
   };
 
   const handleEdit = (establishment: Establishment) => {
-    isPopulatingRef.current = true;
     setEditTarget(establishment);
-
-    // Reverse lookup location codes from names
-    const allRegions = getAllRegions();
-
-    let selectedRegionCode = "";
-    let selectedProvinceCode = "";
-    let selectedMunicipalityCode = "";
-    let selectedBarangayCode = "";
-
-    if (establishment.region) {
-      const foundRegion = allRegions.find(
-        (r) => r.name === establishment.region,
-      );
-      if (foundRegion) {
-        selectedRegionCode = foundRegion.psgcCode;
-      }
-    }
-
-    if (establishment.province) {
-      for (const region of allRegions) {
-        const regionProvinceList = getProvincesByRegion(region.psgcCode);
-        const foundProvince = regionProvinceList.find(
-          (p) => p.name === establishment.province,
-        );
-        if (foundProvince) {
-          if (!selectedRegionCode) {
-            selectedRegionCode = region.psgcCode;
-          }
-          selectedProvinceCode = foundProvince.psgcCode;
-          break;
-        }
-      }
-    }
-
-    if (selectedRegionCode) {
-      const provinceList = getProvincesByRegion(selectedRegionCode);
-      setProvinces(
-        provinceList.map((p: PHProvince) => ({
-          code: p.psgcCode,
-          name: p.name,
-        })),
-      );
-    }
-    setSelectedRegion(selectedRegionCode);
-    let municipalityList: readonly PHMunicipality[] = [];
-    if (selectedProvinceCode) {
-      municipalityList = getMunicipalitiesByProvince(selectedProvinceCode);
-
-      const foundMunicipality = municipalityList.find(
-        (m) => m.name === establishment.city,
-      );
-      if (foundMunicipality) {
-        selectedMunicipalityCode = foundMunicipality.psgcCode;
-      }
-
-      setMunicipalities(
-        municipalityList.map((m: PHMunicipality) => ({
-          code: m.psgcCode,
-          name: m.name,
-        })),
-      );
-      setSelectedMunicipality(selectedMunicipalityCode);
-    }
-    setSelectedProvince(selectedProvinceCode);
-
-    if (selectedMunicipalityCode) {
-      const barangayList = getBarangaysByMunicipality(selectedMunicipalityCode);
-      const foundBarangay = barangayList.find(
-        (b) => b.name === establishment.barangay,
-      );
-      if (foundBarangay) {
-        selectedBarangayCode = foundBarangay.psgcCode;
-      }
-      setBarangays(
-        barangayList.map((b: PHBarangay) => ({
-          code: b.psgcCode,
-          name: b.name,
-        })),
-      );
-    }
-    setSelectedBarangay(selectedBarangayCode);
-
+    // The saved names go straight into the form; the picker resolves its
+    // lists from them.
     setForm({
       name: establishment.name || "",
       industryType: establishment.industryType || "",
@@ -387,19 +226,11 @@ export function useEstablishment() {
   const resetForm = () => {
     setEditTarget(null);
     setForm(EMPTY_FORM);
-    setSelectedRegion("");
-    setSelectedProvince("");
-    setSelectedMunicipality("");
-    setSelectedBarangay("");
   };
 
   const handleOpenAddDialog = () => {
     setEditTarget(null);
     setForm(EMPTY_FORM);
-    setSelectedRegion("");
-    setSelectedProvince("");
-    setSelectedMunicipality("");
-    setSelectedBarangay("");
     setIsDialogOpen(true);
   };
 
@@ -444,18 +275,8 @@ export function useEstablishment() {
     filteredEstablishments,
     isDialogOpen,
 
-    regions,
-    provinces,
-    municipalities,
-    barangays,
-    selectedRegion,
-    selectedProvince,
-    selectedMunicipality,
-    selectedBarangay,
-    setSelectedRegion,
-    setSelectedProvince,
-    setSelectedMunicipality,
-    setSelectedBarangay,
+    address,
+    setAddress,
 
     INDUSTRY_OPTIONS,
     GENDER_OPTIONS,
@@ -477,4 +298,10 @@ export function useEstablishment() {
     handleOpenAddDialog,
     handleCloseDialog,
   };
+}
+
+function readError(err: unknown, fallback: string): string {
+  const data = (err as { data?: { message?: string | string[] } })?.data;
+  if (Array.isArray(data?.message)) return data.message.join(", ");
+  return data?.message ?? fallback;
 }

@@ -12,7 +12,6 @@ import {
   UserPlus,
 } from "lucide-react";
 import TextField from "@/components/ui/TextField";
-import TextArea from "@/components/ui/TextArea";
 import Button from "@/components/ui/Button";
 import SelectField from "@/components/ui/SelectField";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
@@ -20,6 +19,9 @@ import { Establishment } from "@/lib/api/establishmentApi";
 import { Block, Course } from "@/lib/api/courseApi";
 import { SCHOOL_NAME } from "@/lib/school";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
+import AddressPicker from "@/components/ui/AddressPicker";
+import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import { formatAge } from "@/lib/person-name";
 
 interface StudentFormProps {
   form: StudentFormValues;
@@ -35,11 +37,19 @@ interface StudentFormProps {
   setField: (
     key: keyof StudentFormValues,
   ) => (e: { target: { value: string } }) => void;
+  /** Region, province, city, barangay and postal code, for the shared picker. */
+  address: AddressValue;
+  setAddress: (next: AddressValue) => void;
   onCourseChange: (value: string) => void;
   onYearLevelChange: (value: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }
+
+const SEX_OPTIONS = [
+  { label: "Male", value: "Male" },
+  { label: "Female", value: "Female" },
+];
 
 const STATUS_LABEL: Record<StudentStatus, string> = {
   ACTIVE: "Active",
@@ -60,6 +70,8 @@ export default function StudentForm({
   blocks,
   statusOptions,
   setField,
+  address,
+  setAddress,
   onCourseChange,
   onYearLevelChange,
   onSubmit,
@@ -173,33 +185,43 @@ export default function StudentForm({
             placeholder="Dela Cruz"
           />
           <TextField
-            label="Middle Initial"
+            label="Middle Name"
             labelIcon={User}
             fieldIcon={User}
-            value={form.middleInitial}
-            onChange={setField("middleInitial")}
-            placeholder="P"
-            maxLength={10}
+            value={form.middleName}
+            onChange={setField("middleName")}
+            placeholder="Santos"
+            maxLength={120}
           />
-          <TextField
-            label="Age"
-            labelIcon={User}
-            fieldIcon={User}
-            type="number"
-            min={15}
-            max={100}
-            value={form.age}
-            onChange={setField("age")}
-            placeholder="21"
-          />
-          <TextField
-            label="Date of Birth"
-            labelIcon={CalendarDays}
-            fieldIcon={CalendarDays}
-            type="date"
-            value={form.dateOfBirth}
-            onChange={setField("dateOfBirth")}
-          />
+          <div>
+            <span className="block text-sm font-medium text-gray-700 mb-2">
+              Sex
+            </span>
+            <SelectField
+              value={form.gender}
+              onChange={setValue("gender")}
+              placeholder="Select Sex"
+              options={SEX_OPTIONS}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <TextField
+              label="Date of Birth"
+              labelIcon={CalendarDays}
+              fieldIcon={CalendarDays}
+              type="date"
+              value={form.dateOfBirth}
+              onChange={setField("dateOfBirth")}
+            />
+            {/* Age is never typed. It is computed from this date by the
+                server and shown wherever the student's details are. */}
+            <p className="text-xs text-gray-500 mt-1.5">
+              {editTarget && formatAge(editTarget.age)
+                ? `Currently ${formatAge(editTarget.age)} — age is worked out from this date.`
+                : "Age is worked out from this date automatically."}
+            </p>
+          </div>
           <TextField
             label="Contact Number"
             labelIcon={Phone}
@@ -210,14 +232,39 @@ export default function StudentForm({
             pattern="\d{11}"
             title="Please enter exactly 11 digits (e.g., 09123456789)"
           />
-          <TextArea
-            label="Complete Address"
+        </div>
+      </section>
+
+      <section className="border-l-4 border-blue-400 pl-4 md:pl-6">
+        <div className="flex items-center gap-2 mb-4">
+          <MapPin size={16} className="text-gray-700" />
+          <h3 className="font-semibold text-gray-900 text-base md:text-lg">
+            Address
+          </h3>
+        </div>
+        {editTarget?.legacyAddress && !editTarget.region && (
+          <p className="text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3">
+            <span className="font-medium text-gray-800">
+              Address on file (old format):
+            </span>{" "}
+            {editTarget.legacyAddress}. Choose it from the lists below to
+            replace it.
+          </p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          <AddressPicker
+            value={address}
+            onChange={setAddress}
+            idPrefix="student"
+          />
+          <TextField
+            label="House No. / Street (optional)"
             labelIcon={MapPin}
             fieldIcon={MapPin}
-            value={form.address}
-            onChange={setField("address")}
-            placeholder="House/Unit, Street, Barangay, City, Province"
-            rows={2}
+            value={form.streetAddress}
+            onChange={setField("streetAddress")}
+            placeholder="House no., street, purok"
+            maxLength={255}
           />
         </div>
       </section>

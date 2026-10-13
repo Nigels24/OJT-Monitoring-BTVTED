@@ -40,18 +40,8 @@ export default function EstablishmentManagementPage() {
     totalPages,
     INDUSTRY_OPTIONS,
     GENDER_OPTIONS,
-    regions,
-    provinces,
-    municipalities,
-    barangays,
-    selectedRegion,
-    selectedProvince,
-    selectedMunicipality,
-    selectedBarangay,
-    setSelectedRegion,
-    setSelectedProvince,
-    setSelectedMunicipality,
-    setSelectedBarangay,
+    address,
+    setAddress,
     setField,
     setIsDialogOpen,
     isDialogOpen,
@@ -151,18 +141,8 @@ export default function EstablishmentManagementPage() {
         error={error}
         industryOptions={INDUSTRY_OPTIONS}
         genderOptions={GENDER_OPTIONS}
-        regions={regions}
-        provinces={provinces}
-        municipalities={municipalities}
-        barangays={barangays}
-        selectedRegion={selectedRegion}
-        selectedProvince={selectedProvince}
-        selectedMunicipality={selectedMunicipality}
-        selectedBarangay={selectedBarangay}
-        setSelectedRegion={setSelectedRegion}
-        setSelectedProvince={setSelectedProvince}
-        setSelectedMunicipality={setSelectedMunicipality}
-        setSelectedBarangay={setSelectedBarangay}
+        address={address}
+        setAddress={setAddress}
         setField={setField}
         onSubmit={handleSubmit}
         onReset={handleCloseDialog}

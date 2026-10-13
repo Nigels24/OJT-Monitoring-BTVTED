@@ -49,6 +49,8 @@ const USERNAME_PATTERN = /^[a-zA-Z0-9._-]{4,30}$/;
 const USERNAME_MESSAGE =
   'username must be 4-30 characters using letters, numbers, dot, underscore or hyphen (no "@")';
 
+const STUDENT_SEXES = ['Male', 'Female'] as const;
+
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
 const ACADEMIC_YEAR_PATTERN = /^\d{4}-\d{4}$/;
 const ACADEMIC_YEAR_MESSAGE = 'academicYear must look like "2025-2026"';
@@ -108,29 +110,28 @@ class StudentDetailsDto {
   @MaxLength(120)
   lastName?: string | null;
 
+  // The full middle name; an initial is derived where one is needed
+  // (`common/person-name.ts`).
   @IsOptional()
   @EmptyToNull()
   @IsString()
-  @MaxLength(10)
-  middleInitial?: string | null;
+  @MaxLength(120)
+  middleName?: string | null;
 
+  // "Sex" on the form. Stored in the `gender` column.
   @IsOptional()
-  @ToNullableNumber()
-  @IsInt()
-  @Min(15)
-  @Max(100)
-  age?: number | null;
+  @EmptyToNull()
+  @IsIn(STUDENT_SEXES)
+  gender?: (typeof STUDENT_SEXES)[number] | null;
 
+  // There is no `age` here on purpose: age is computed from this date and
+  // returned read-only, and `forbidNonWhitelisted` rejects a body that tries
+  // to send one. Likewise no `school` — every student belongs to the one
+  // school this system serves.
   @IsOptional()
   @EmptyToNull()
   @IsDateString()
   dateOfBirth?: string | null;
-
-  @IsOptional()
-  @EmptyToNull()
-  @IsString()
-  @MaxLength(200)
-  school?: string | null;
 
   // Philippine mobile format, matching the prototype's own input validation.
   @IsOptional()
@@ -140,11 +141,46 @@ class StudentDetailsDto {
   })
   contactNumber?: string | null;
 
+  // The standardized address: names chosen from the PSGC lists, the same
+  // shape Establishment uses. All nullable, so EmptyToNull — clearing a select
+  // clears the column. Whether the names are real and consistent with each
+  // other is checked in the service (`common/ph-address.ts`), which needs all
+  // of them at once; here they are only bounded.
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  region?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  province?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  cityMunicipality?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(120)
+  barangay?: string | null;
+
+  // House number / street / purok — the one free-text part.
   @IsOptional()
   @EmptyToNull()
   @IsString()
   @MaxLength(255)
-  address?: string | null;
+  streetAddress?: string | null;
+
+  @IsOptional()
+  @EmptyToNull()
+  @Matches(/^\d{4}$/, { message: 'postalCode must be exactly 4 digits' })
+  postalCode?: string | null;
 
   @IsOptional()
   @EmptyToNull()
