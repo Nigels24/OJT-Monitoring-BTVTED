@@ -1,10 +1,12 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { placementThreadName } from './placement-thread.service';
 
 export const DEFAULT_MESSAGE_PAGE_SIZE = 50;
 
@@ -13,6 +15,52 @@ export interface Contact {
   name: string;
   role: 'STUDENT' | 'SUPERVISOR' | 'COORDINATOR';
   establishmentName: string | null;
+}
+
+/**
+ * What a conversation needs from its placement to be shown as a group thread:
+ * the two names its title is built from, and the status that decides whether
+ * it still accepts messages. NULL on a 1:1 conversation.
+ */
+const THREAD_ASSIGNMENT_SELECT = {
+  select: {
+    id: true,
+    status: true,
+    student: { select: { user: { select: { name: true } } } },
+    establishment: { select: { name: true } },
+  },
+} as const;
+
+type ThreadConversation = {
+  isGroup: boolean;
+  trainingAssignment: {
+    id: string;
+    status: string;
+    student: { user: { name: string } };
+    establishment: { name: string };
+  } | null;
+};
+
+/**
+ * The group-thread half of a conversation summary. A 1:1 conversation reads
+ * `isGroup: false` with the rest empty, so every summary has one shape.
+ *
+ * `readOnly` is true once the placement is no longer ACTIVE: the thread stays
+ * readable, but `sendMessage` refuses to add to it.
+ */
+function threadFields(conversation: ThreadConversation) {
+  const assignment = conversation.trainingAssignment;
+  return {
+    isGroup: conversation.isGroup,
+    name: assignment
+      ? placementThreadName(
+          assignment.student.user.name,
+          assignment.establishment.name,
+        )
+      : null,
+    trainingAssignmentId: assignment?.id ?? null,
+    readOnly: assignment !== null && assignment.status !== 'ACTIVE',
+  };
 }
 
 @Injectable()
@@ -146,7 +194,13 @@ export class MessagesService {
         select: {
           conversationId: true,
           lastReadAt: true,
-          conversation: { select: { createdAt: true } },
+          conversation: {
+            select: {
+              createdAt: true,
+              isGroup: true,
+              trainingAssignment: THREAD_ASSIGNMENT_SELECT,
+            },
+          },
         },
       });
     if (participants.length === 0) {
@@ -155,13 +209,14 @@ export class MessagesService {
 
     const ids = participants.map((p) => p.conversationId);
     const EPOCH = new Date(0);
-    const conversationCreatedAtById = new Map(
-      participants.map((p) => [p.conversationId, p.conversation.createdAt]),
+    const conversationById = new Map(
+      participants.map((p) => [p.conversationId, p.conversation]),
     );
 
     const [others, lastMessages, unreadCounts] = await Promise.all([
-      // 1:1 conversations only (isGroup is always false), so this is exactly
-      // one row per conversation id — the other participant.
+      // Everyone else in each conversation: exactly one row for a 1:1, and
+      // every other member for a placement's group thread. Still one query
+      // for the whole list — grouped in memory below.
       this.prisma.client.conversationParticipant.findMany({
         where: { conversationId: { in: ids }, userId: { not: userId } },
         select: {
@@ -182,6 +237,7 @@ export class MessagesService {
           senderId: true,
           content: true,
           createdAt: true,
+          sender: { select: { name: true } },
         },
       }),
       // Each conversation keeps its own lastReadAt cutoff via an OR of
@@ -203,13 +259,19 @@ export class MessagesService {
       }),
     ]);
 
-    const otherById = new Map(others.map((o) => [o.conversationId, o.user]));
+    const othersById = new Map<string, (typeof others)[number]['user'][]>();
+    for (const other of others) {
+      const list = othersById.get(other.conversationId) ?? [];
+      list.push(other.user);
+      othersById.set(other.conversationId, list);
+    }
     const lastMessageById = new Map(
       lastMessages.map((m) => [
         m.conversationId,
         {
           id: m.id,
           senderId: m.senderId,
+          senderName: m.sender.name,
           content: m.content,
           createdAt: m.createdAt,
         },
@@ -224,12 +286,17 @@ export class MessagesService {
 
     const summaries = ids.map((id) => {
       const lastMessage = lastMessageById.get(id) ?? null;
+      const conversation = conversationById.get(id)!;
+      const members = othersById.get(id) ?? [];
       return {
         id,
-        otherParticipant: otherById.get(id) ?? null,
+        ...threadFields(conversation),
+        // The one other person in a 1:1; a group thread has `members` instead.
+        otherParticipant: conversation.isGroup ? null : (members[0] ?? null),
+        members: conversation.isGroup ? members : [],
         lastMessage,
         unreadCount: unreadCountById.get(id) ?? 0,
-        updatedAt: lastMessage?.createdAt ?? conversationCreatedAtById.get(id)!,
+        updatedAt: lastMessage?.createdAt ?? conversation.createdAt,
       };
     });
 
@@ -281,7 +348,8 @@ export class MessagesService {
   }
 
   /**
-   * Messages for one conversation, cursor-paginated newest-page-first — the
+   * Messages for one conversation (a 1:1 or a placement's group thread —
+   * participation is checked the same way for both), cursor-paginated newest-page-first — the
    * one table that grows without limit (§8 item 4 already flags unbounded
    * `findMany` as debt elsewhere), so this never fetches the whole thread.
    * Marks the caller's `lastReadAt` as now.
@@ -313,7 +381,7 @@ export class MessagesService {
       },
       orderBy: { createdAt: 'desc' },
       take: limit ?? DEFAULT_MESSAGE_PAGE_SIZE,
-      select: { id: true, senderId: true, content: true, createdAt: true },
+      select: MESSAGE_SELECT,
     });
 
     await this.prisma.client.conversationParticipant.update({
@@ -324,25 +392,42 @@ export class MessagesService {
     return messages;
   }
 
+  /**
+   * Sends a message to a conversation the caller takes part in.
+   *
+   * A placement's group thread stops accepting messages the moment its
+   * placement is no longer ACTIVE (transferred, completed or cancelled). It
+   * stays readable until retention clears it; only this write is refused, and
+   * refused here rather than by hiding the composer.
+   */
   async sendMessage(userId: string, conversationId: string, content: string) {
-    await this.requireParticipant(conversationId, userId);
+    const conversation = await this.requireParticipant(conversationId, userId);
+    if (threadFields(conversation).readOnly) {
+      throw new ConflictException(
+        'This placement has ended, so its thread is read-only. No new messages can be sent.',
+      );
+    }
 
     return this.prisma.client.message.create({
       data: { conversationId, senderId: userId, content },
-      select: {
-        id: true,
-        conversationId: true,
-        senderId: true,
-        content: true,
-        createdAt: true,
-      },
+      select: { ...MESSAGE_SELECT, conversationId: true },
     });
   }
 
+  /**
+   * The one participation check, used by every read and every send — 1:1 and
+   * group thread alike. Being a student, or a supervisor at the right
+   * establishment, proves nothing by itself: only a participant row does.
+   * Returns the conversation's thread fields for the caller that needs them.
+   */
   private async requireParticipant(conversationId: string, userId: string) {
     const conversation = await this.prisma.client.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true },
+      select: {
+        id: true,
+        isGroup: true,
+        trainingAssignment: THREAD_ASSIGNMENT_SELECT,
+      },
     });
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
@@ -357,7 +442,7 @@ export class MessagesService {
         'You are not a participant in this conversation',
       );
     }
-    return participant;
+    return conversation;
   }
 
   /**
@@ -372,7 +457,13 @@ export class MessagesService {
         where: { conversationId_userId: { conversationId, userId } },
         select: {
           lastReadAt: true,
-          conversation: { select: { createdAt: true } },
+          conversation: {
+            select: {
+              createdAt: true,
+              isGroup: true,
+              trainingAssignment: THREAD_ASSIGNMENT_SELECT,
+            },
+          },
         },
       });
     if (!participant) {
@@ -389,7 +480,13 @@ export class MessagesService {
       this.prisma.client.message.findFirst({
         where: { conversationId },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, senderId: true, content: true, createdAt: true },
+        select: {
+          id: true,
+          senderId: true,
+          content: true,
+          createdAt: true,
+          sender: { select: { name: true } },
+        },
       }),
       this.prisma.client.message.count({
         where: {
@@ -402,13 +499,38 @@ export class MessagesService {
 
     return {
       id: conversationId,
+      ...threadFields(participant.conversation),
       otherParticipant: other?.user ?? null,
-      lastMessage,
+      // Only ever called for a 1:1 (`findOrCreateConversation`), which has no
+      // member list; kept so every summary has the same shape.
+      members: [],
+      lastMessage: lastMessage
+        ? {
+            id: lastMessage.id,
+            senderId: lastMessage.senderId,
+            senderName: lastMessage.sender.name,
+            content: lastMessage.content,
+            createdAt: lastMessage.createdAt,
+          }
+        : null,
       unreadCount,
       updatedAt: lastMessage?.createdAt ?? participant.conversation.createdAt,
     };
   }
 }
+
+/**
+ * A message as the thread renders it. The sender's name and role travel with
+ * each one because a group thread has several senders — the client cannot
+ * infer who wrote a bubble from "the other participant" there.
+ */
+const MESSAGE_SELECT = {
+  id: true,
+  senderId: true,
+  content: true,
+  createdAt: true,
+  sender: { select: { id: true, name: true, role: true } },
+} as const;
 
 function toStudentContact(s: {
   user: { id: string; name: string };

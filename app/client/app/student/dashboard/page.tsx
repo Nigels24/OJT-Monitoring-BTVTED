@@ -24,6 +24,7 @@ import { useGetMyDashboardQuery } from "@/lib/api/studentPortalApi";
 import { STUDENT_NAV } from "@/features/student-portal/nav";
 import AttendanceTable from "@/features/student-portal/components/AttendanceTable";
 import AssessmentCard from "@/features/student-portal/components/AssessmentCard";
+import AnnouncementsCard from "@/features/announcements/components/AnnouncementsCard";
 
 export default function StudentDashboardPage() {
   const { data, isLoading, error } = useGetMyDashboardQuery();
@@ -105,6 +106,8 @@ export default function StudentDashboardPage() {
                   ` ${data.stats.pendingHours} more hours are awaiting approval.`}
               </p>
             </Card>
+
+            <AnnouncementsCard />
 
             <AssessmentCard assessment={data.assessment} />
 

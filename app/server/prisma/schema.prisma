@@ -67,6 +67,26 @@ enum WeeklyTaskStatus {
   RATED
 }
 
+enum ConcernCategory {
+  CONDUCT
+  PERFORMANCE
+  ATTENDANCE
+  OTHER
+}
+
+enum ConcernStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+/// Who an announcement is for. Narrowed further by its optional block/course.
+enum AnnouncementAudience {
+  STUDENTS
+  SUPERVISORS
+  ALL
+}
+
 /// Which phase of the placement a required document belongs to (thesis Table 3).
 enum DocumentStage {
   APPLICATION
@@ -87,6 +107,8 @@ enum NotificationType {
   WEEKLY_TASK_ASSIGNED
   WEEKLY_TASK_DONE
   WEEKLY_TASK_RATED
+  CONCERN_RESPONDED
+  ANNOUNCEMENT_POSTED
 }
 
 model User {
@@ -112,9 +134,10 @@ model User {
   supervisorProfile  Supervisor?
   coordinatorProfile Coordinator?
 
-  conversations ConversationParticipant[]
-  messagesSent  Message[]
-  notifications Notification[]
+  conversations     ConversationParticipant[]
+  messagesSent      Message[]
+  notifications     Notification[]
+  announcementReads AnnouncementRead[]
 
   /// Documents this account uploaded — the student's own, or a coordinator's
   /// upload on a student's behalf. Keyed to User, not Student/Coordinator,
@@ -161,6 +184,7 @@ model Supervisor {
   attendanceApprovals Attendance[] @relation("ApprovedBy")
   evaluations         Evaluation[]
   weeklyTasks         WeeklyTask[]
+  concernsRaised      Concern[]
 }
 
 model Coordinator {
@@ -172,6 +196,8 @@ model Coordinator {
   blocks            Block[]
   gradedAssignments TrainingAssignment[]
   reviewedJournals  JournalEntry[]
+  concernsResponded Concern[]
+  announcements     Announcement[]
 }
 
 /// A degree program that places students in OJT, e.g. "BTVTED-CHS".
@@ -186,9 +212,10 @@ model Course {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  requirements CourseRequirement[]
-  blocks       Block[]
-  students     Student[]
+  requirements  CourseRequirement[]
+  blocks        Block[]
+  students      Student[]
+  announcements Announcement[]
 }
 
 /// How many OJT hours a course requires at a given year level. A program can
@@ -225,6 +252,7 @@ model Block {
 
   students            Student[]
   trainingAssignments TrainingAssignment[]
+  announcements       Announcement[]
 
   @@unique([courseId, yearLevel, name, academicYear])
 }
@@ -279,6 +307,9 @@ model TrainingAssignment {
   evaluations    Evaluation[]
   journalEntries JournalEntry[]
   weeklyTasks    WeeklyTask[]
+  concerns       Concern[]
+  /// The placement's group thread (CLAUDE.md §15). At most one.
+  conversation   Conversation?
 
   @@index([studentId, status])
 }
@@ -498,6 +529,7 @@ model Student {
   trainingAssignments TrainingAssignment[]
   journalEntries      JournalEntry[]
   weeklyTasks         WeeklyTask[]
+  concerns            Concern[]
 }
 
 model Attendance {
@@ -762,6 +794,15 @@ model Conversation {
   createdBy String
   createdAt DateTime @default(now())
 
+  /// Set only on a placement's group thread (`isGroup: true`): the one
+  /// conversation in which the student, the establishment's supervisors and the
+  /// coordinators all take part. Unique, so a placement can never have two.
+  /// NULL on every 1:1 conversation, and Postgres does not treat NULLs as
+  /// equal, so those are unaffected. The thread's display name is derived from
+  /// the assignment at read time, not stored in `name`, so a rename shows up.
+  trainingAssignmentId String?             @unique
+  trainingAssignment   TrainingAssignment? @relation(fields: [trainingAssignmentId], references: [id])
+
   participants ConversationParticipant[]
   messages     Message[]
 }
@@ -786,6 +827,90 @@ model Message {
   sender         User         @relation(fields: [senderId], references: [id])
   content        String
   createdAt      DateTime     @default(now())
+}
+
+/// A supervisor's concern about a trainee's conduct or performance, raised to
+/// the coordinator and recorded against the placement.
+///
+/// Deliberately NOT a Message: it is a record with a status and a response,
+/// kept permanently, and the 30-day message retention sweep never touches it.
+/// The student has no route that reads this table.
+model Concern {
+  id                   String             @id @default(cuid())
+  trainingAssignmentId String
+  trainingAssignment   TrainingAssignment @relation(fields: [trainingAssignmentId], references: [id])
+  /// Denormalised from the assignment, as on JournalEntry and WeeklyTask.
+  studentId            String
+  student              Student            @relation(fields: [studentId], references: [id])
+
+  /// Nullable so the concern outlives the supervisor's account (it is nulled,
+  /// never deleted — see cascade-delete.ts). `raisedByName` is the snapshot
+  /// taken when it was raised, so the record still says who that was.
+  raisedById   String?
+  raisedBy     Supervisor? @relation(fields: [raisedById], references: [id])
+  raisedByName String
+
+  category    ConcernCategory
+  description String
+  status      ConcernStatus   @default(OPEN)
+
+  coordinatorResponse String?
+  respondedById       String?
+  respondedBy         Coordinator? @relation(fields: [respondedById], references: [id])
+  /// Moves only when the status or the response actually changes, so it is
+  /// also the version marker of the CONCERN_RESPONDED notification.
+  respondedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([trainingAssignmentId])
+  @@index([status, createdAt])
+}
+
+/// A coordinator's announcement to students, supervisors or both, optionally
+/// limited to one block and/or one program. Kept until a coordinator deletes
+/// it; never touched by the message retention sweep.
+model Announcement {
+  id       String               @id @default(cuid())
+  title    String
+  body     String
+  audience AnnouncementAudience
+
+  /// Both optional and independent: NULL means "not limited by this".
+  /// `onDelete: Restrict` — a restriction, not a cascade, like
+  /// Evaluation.template: a block or course with an announcement on it cannot
+  /// be deleted (CourseService answers 409 first), because the default SET
+  /// NULL would silently widen who the announcement reaches.
+  blockId  String?
+  block    Block?  @relation(fields: [blockId], references: [id], onDelete: Restrict)
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id], onDelete: Restrict)
+
+  postedById String
+  postedBy   Coordinator @relation(fields: [postedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reads AnnouncementRead[]
+
+  @@index([audience, createdAt])
+}
+
+/// One user having read one announcement — what the unread marker is computed
+/// from. No `onDelete: Cascade` (CLAUDE.md §6): rows are removed explicitly
+/// when the announcement or the user is deleted.
+model AnnouncementRead {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  readAt         DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
 }
 
 /// In-app notifications only (thesis Obj 9) — no email infrastructure exists,

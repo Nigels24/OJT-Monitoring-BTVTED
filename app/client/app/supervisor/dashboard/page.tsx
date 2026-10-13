@@ -23,12 +23,18 @@ import {
 import { SUPERVISOR_NAV } from "@/features/supervisor/nav";
 import StudentRoster from "@/features/supervisor/components/StudentRoster";
 import SectionError from "@/components/ui/SectionError";
+import AnnouncementsCard from "@/features/announcements/components/AnnouncementsCard";
+import MyConcernsCard from "@/features/concerns/components/MyConcernsCard";
+import RaiseConcernDialog from "@/features/concerns/components/RaiseConcernDialog";
+import { useRaiseConcern } from "@/features/concerns/hooks/use-raise-concern";
 
 export default function SupervisorDashboardPage() {
   const { data, isLoading, error, refetch, isFetching } =
     useGetSupervisorDashboardQuery();
   const { data: students, isLoading: studentsLoading } =
     useGetSupervisorStudentsQuery();
+
+  const concern = useRaiseConcern();
 
   const displayName = data?.supervisor.name ?? "Supervisor";
 
@@ -105,6 +111,8 @@ export default function SupervisorDashboardPage() {
               />
             </div>
 
+            <AnnouncementsCard />
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
               <Card>
                 <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -166,6 +174,8 @@ export default function SupervisorDashboardPage() {
               </Card>
             </div>
 
+            <MyConcernsCard />
+
             <Card>
               <h2 className="text-base md:text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
                 <Users size={18} className="text-blue-600" />
@@ -178,11 +188,19 @@ export default function SupervisorDashboardPage() {
               <StudentRoster
                 students={students ?? []}
                 isLoading={studentsLoading}
+                onRaiseConcern={(student) => {
+                  concern.open({
+                    assignmentId: student.assignmentId,
+                    traineeName: student.user.name,
+                  });
+                }}
               />
             </Card>
           </>
         )}
       </main>
+
+      <RaiseConcernDialog {...concern} />
     </div>
   );
 }

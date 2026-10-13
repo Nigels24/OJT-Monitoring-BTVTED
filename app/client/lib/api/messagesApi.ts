@@ -17,17 +17,55 @@ export interface Contact {
   establishmentName: string | null;
 }
 
+/** Messages are deleted this many days after they are sent — mirrors the server's `MESSAGE_RETENTION_DAYS`. */
+export const MESSAGE_RETENTION_DAYS = 30;
+
+export interface ConversationMember {
+  id: string;
+  name: string;
+  role: ContactRole;
+}
+
+/** One message in an open thread, with who sent it. */
 export interface MessageSummary {
   id: string;
   senderId: string;
   content: string;
   createdAt: string;
+  /** Sent with every message: a group thread has several senders. */
+  sender: ConversationMember;
 }
 
+/** The newest message of a conversation, as the list previews it. */
+export interface LastMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * One conversation in the list — a 1:1, or a placement's group thread.
+ *
+ * A group thread (`isGroup`) belongs to one training assignment and has the
+ * student, the establishment's supervisors and the coordinators in it; its
+ * `name` is "<Student> — <Establishment>" and `members` lists everyone else.
+ * A 1:1 has `otherParticipant` instead, with `name` null and `members` empty.
+ */
 export interface ConversationSummary {
   id: string;
-  otherParticipant: { id: string; name: string; role: ContactRole } | null;
-  lastMessage: MessageSummary | null;
+  isGroup: boolean;
+  name: string | null;
+  trainingAssignmentId: string | null;
+  /**
+   * True once a group thread's placement has ended: still readable, but the
+   * server refuses new messages.
+   */
+  readOnly: boolean;
+  otherParticipant: ConversationMember | null;
+  members: ConversationMember[];
+  lastMessage: LastMessage | null;
   unreadCount: number;
   updatedAt: string;
 }

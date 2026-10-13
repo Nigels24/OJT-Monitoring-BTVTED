@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   Globe,
   NotebookPen,
+  TriangleAlert,
 } from "lucide-react";
 import {
   useGetCoordinatorDashboardQuery,
@@ -36,6 +37,7 @@ import {
   OverdueVerificationRow,
 } from "@/lib/api/dashboardApi";
 import { useGetJournalsAwaitingCountQuery } from "@/lib/api/journalApi";
+import { useGetOpenConcernCountQuery } from "@/lib/api/concernApi";
 import { formatDateOnly } from "@/lib/format";
 import SectionError from "@/components/ui/SectionError";
 
@@ -171,6 +173,11 @@ export default function CoordinatorDashboard() {
   const { data: journalsAwaiting, isError: journalsError } =
     useGetJournalsAwaitingCountQuery(overdueScope);
 
+  // Concerns supervisors have raised that nobody has acknowledged yet — the
+  // same toggle again, and its own request for the same reason.
+  const { data: openConcerns, isError: concernsError } =
+    useGetOpenConcernCountQuery(overdueScope);
+
   /**
    * Sections the endpoint reported as failed. It returns empty defaults for
    * these rather than a 500, so everything that loaded still renders and only
@@ -294,6 +301,18 @@ export default function CoordinatorDashboard() {
                     : "program-wide"
                 }
               />
+              <Link href="/coordinator/concerns" className="block">
+                <StatCard
+                  label="Open Concerns"
+                  value={concernsError ? "—" : (openConcerns?.count ?? "—")}
+                  icon={TriangleAlert}
+                  subtext={
+                    overdueScope === "block" && !openConcerns?.noBlocksAssigned
+                      ? "raised by supervisors · your blocks"
+                      : "raised by supervisors · program-wide"
+                  }
+                />
+              </Link>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">

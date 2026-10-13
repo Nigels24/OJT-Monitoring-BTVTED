@@ -9,6 +9,8 @@ import {
   Star,
   FileText,
   MessageSquare,
+  Megaphone,
+  TriangleAlert,
 } from "lucide-react";
 
 /**
@@ -39,5 +41,11 @@ export const COORDINATOR_NAV = [
   },
   { label: "Evaluations", href: "/coordinator/evaluations", icon: Star },
   { label: "Documents", href: "/coordinator/documents", icon: FileText },
+  { label: "Concerns", href: "/coordinator/concerns", icon: TriangleAlert },
+  {
+    label: "Announcements",
+    href: "/coordinator/announcements",
+    icon: Megaphone,
+  },
   { label: "Messages", href: "/coordinator/messages", icon: MessageSquare },
 ];

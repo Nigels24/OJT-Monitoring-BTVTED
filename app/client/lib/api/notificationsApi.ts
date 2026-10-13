@@ -18,7 +18,9 @@ export type NotificationType =
   | "PLACEMENT_RECORDED"
   | "WEEKLY_TASK_ASSIGNED"
   | "WEEKLY_TASK_DONE"
-  | "WEEKLY_TASK_RATED";
+  | "WEEKLY_TASK_RATED"
+  | "CONCERN_RESPONDED"
+  | "ANNOUNCEMENT_POSTED";
 
 export interface AppNotification {
   id: string;

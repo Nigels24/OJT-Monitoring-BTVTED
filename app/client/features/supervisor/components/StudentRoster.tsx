@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Users, CheckCircle2, RotateCcw } from "lucide-react";
+import { Users, CheckCircle2, RotateCcw, TriangleAlert } from "lucide-react";
 import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import ProgressBar from "@/components/ui/ProgressBar";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -14,6 +14,12 @@ import { formatGrade } from "@/lib/format";
 interface StudentRosterProps {
   students: SupervisorStudent[];
   isLoading: boolean;
+  /**
+   * Opens the "Raise concern" dialog for a trainee. Supplying it is what
+   * renders the button; the server checks the placement is at this
+   * supervisor's establishment.
+   */
+  onRaiseConcern?: (student: SupervisorStudent) => void;
 }
 
 /**
@@ -27,6 +33,7 @@ interface StudentRosterProps {
 export default function StudentRoster({
   students,
   isLoading,
+  onRaiseConcern,
 }: StudentRosterProps) {
   const [target, setTarget] = useState<SupervisorStudent | null>(null);
   const [setStudentStatus] = useSetStudentStatusMutation();
@@ -139,8 +146,19 @@ export default function StudentRoster({
     {
       key: "actions",
       label: "Actions",
-      render: (r) =>
-        r.status === "COMPLETED" ? (
+      render: (r) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onRaiseConcern && (
+            <button
+              onClick={() => onRaiseConcern(r)}
+              className="px-2 py-1.5 rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 inline-flex items-center gap-1 text-xs font-medium"
+              aria-label={`Raise a concern about ${r.user.name}`}
+            >
+              <TriangleAlert size={14} />
+              Raise concern
+            </button>
+          )}
+          {r.status === "COMPLETED" ? (
           <button
             onClick={() => setTarget(r)}
             className="px-2 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-1 text-xs font-medium"
@@ -158,7 +176,9 @@ export default function StudentRoster({
             <CheckCircle2 size={14} />
             Mark Complete
           </button>
-        ),
+          )}
+        </div>
+      ),
     },
   ];
 

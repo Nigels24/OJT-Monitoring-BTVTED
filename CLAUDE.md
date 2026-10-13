@@ -21,7 +21,7 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — src/common/assignment-grade.spec.ts and weekly-tasks.spec.ts so far (--passWithNoTests)
+npm test                             # jest, rootDir src, *.spec.ts — five spec files so far, all pure rules or a stubbed-Prisma service (--passWithNoTests)
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -49,7 +49,7 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -188,6 +188,24 @@ A placement is assessed twice, and the two figures are **never combined**: the s
 - **One response shape.** Every role's `GET .../weekly-tasks?assignmentId&week` returns the same week object (tasks, photos, counts, average, header fields), and the printed report renders from it — there is no separate summary endpoint to drift.
 
 Client: `features/weekly-tasks/`, slice `lib/api/weeklyTaskApi.ts`. Print routes are `/{student,supervisor,coordinator}/weekly-tasks/print?assignment=…&week=…`. `components/ui/PrintPage.tsx` is the shared print shell (toolbar + A4 frame) used by this report and by the §13 evaluation sheet. Pages that read the URL wrap `useSearchParams` in `<Suspense>`, as the students page does.
+
+### 15. Placement threads, concerns, announcements, and message retention
+
+Four things that look alike and are deliberately kept apart: **messages** are chat and expire; **concerns** and **announcements** are records and do not; **feedback on a record** (decline reason, journal remarks, weekly-task comment) was never a message at all.
+
+**Placement threads.** Every `TrainingAssignment` has one group `Conversation` (`isGroup: true`, `trainingAssignmentId` unique) with the student, every supervisor at the establishment and every coordinator in it. `PlacementThreadService` (`src/messages/`) owns existence and membership only — reading and sending still go through `MessagesService` and the same `/messages` endpoints as a 1:1 (§5), where `requireParticipant` is the single access check for both kinds.
+
+- Created inside `createPlacement`'s transaction; `createSupervisor` adds the new supervisor to the active threads at their establishment; `syncAll()` runs **on every boot** and idempotently creates missing threads and adds missing participants. That boot sync is the backfill (there is none in the migration) and the only hook for a coordinator account, which the seed/CLI creates outside the app.
+- The thread's name is derived at read time (`<Student> — <Establishment>`), never stored. It is **read-only once the assignment is not ACTIVE**: `sendMessage` answers 409; the client's banner is only the explanation.
+- Each message is returned with its `sender` (a group has several), and each summary with `isGroup`/`name`/`readOnly`/`members`. Unread counts needed no change — they were already per participant.
+
+**Concerns** (`src/concern/`). A supervisor raises one about a trainee whose *assignment* is at their establishment (§2; any status); it is stored on `Concern` against the placement with a `raisedByName` snapshot. Coordinators acknowledge/resolve with an optional response (never back to OPEN; an unchanged save is a no-op). The supervisor sees only the ones they raised. **There is no student route** — that, not a hidden UI element, is why students cannot see concerns. No delete route either. Notifications: `CONCERN_RAISED:${id}` to the block's coordinator (all coordinators if there is none, like the overdue sweep), `CONCERN_RESPONDED:${id}:${respondedAt}` to the raiser.
+
+**Announcements** (`src/announcement/`). Coordinator CRUD under `/coordinator/announcements`; students and supervisors read theirs from the bare `/announcements` (§5-style: one shape, filtered from the caller's own profile). Who one reaches is the single rule in `src/common/announcement-audience.ts`, in two forms that must agree — `announcementWhereFor` for listing, `isAnnouncementVisibleTo` for choosing whom to notify. `audience` picks the role; `blockId`/`courseId` are optional and both must match when set. A supervisor has no block or program, so matches through the trainees actively placed with them. Posting notifies once (`ANNOUNCEMENT_POSTED:${id}`); editing never re-notifies. `Announcement.block`/`course` are `onDelete: Restrict` and `CourseService` 409s first — the default SET NULL would silently widen the audience.
+
+**Retention.** `MessageRetentionSweepService` deletes `Message` rows older than `MESSAGE_RETENTION_DAYS` (30, `src/common/message-retention.ts`) on boot and every 24h via `setInterval`, with an in-flight guard. Its whole `where` is `expiredMessagesWhere()` — `createdAt` only, so it applies to 1:1 and group alike — and it touches no other table: conversations, participants, concerns, announcements and notifications are never deleted by it. The client shows the 30-day note from its own mirrored constant; keep the two equal.
+
+**Cascade (§6).** Deleting a student deletes their concerns and each placement's thread outright (everyone's messages in it, since the thread has no meaning without the placement). Deleting a supervisor **nulls** `Concern.raisedById` and removes their thread membership via the messaging footprint. `AnnouncementRead` has no cascade and is deleted explicitly with its announcement or its user.
 
 ### Client
 

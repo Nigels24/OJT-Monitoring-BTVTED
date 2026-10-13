@@ -1,9 +1,13 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
-import { ChevronLeft, MessageSquare, Send } from "lucide-react";
+import { ChevronLeft, Clock, Lock, MessageSquare, Send, Users } from "lucide-react";
 import Avatar from "@/components/ui/Avatar";
-import { ConversationSummary, MessageSummary } from "@/lib/api/messagesApi";
+import {
+  ConversationSummary,
+  MESSAGE_RETENTION_DAYS,
+  MessageSummary,
+} from "@/lib/api/messagesApi";
 import { formatMessageTimestamp } from "../format";
 
 interface MessageThreadProps {
@@ -20,6 +24,12 @@ interface MessageThreadProps {
   onSend: () => void;
   maxMessageLength: number;
   onBack: () => void;
+  /**
+   * Something for the thread's header, on the right — the supervisor's
+   * "Raise concern" button on a placement thread. The page decides whether
+   * there is one; the server decides whether it is allowed.
+   */
+  headerAction?: React.ReactNode;
   /** Hidden on mobile until a conversation is open — see MessagingView. */
   className?: string;
 }
@@ -38,6 +48,7 @@ export default function MessageThread({
   onSend,
   maxMessageLength,
   onBack,
+  headerAction,
   className = "",
 }: MessageThreadProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -87,6 +98,7 @@ export default function MessageThread({
   }
 
   const other = conversation.otherParticipant;
+  const isGroup = conversation.isGroup;
   const nearLimit = draft.length > maxMessageLength * 0.9;
   const overLimit = draft.length > maxMessageLength;
 
@@ -100,18 +112,39 @@ export default function MessageThread({
         >
           <ChevronLeft size={20} />
         </button>
-        <Avatar name={other?.name ?? "?"} size={36} />
-        <div className="min-w-0">
+        {isGroup ? (
+          <span className="w-9 h-9 shrink-0 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
+            <Users size={16} />
+          </span>
+        ) : (
+          <Avatar name={other?.name ?? "?"} size={36} />
+        )}
+        <div className="min-w-0 flex-1">
           <p className="font-medium text-gray-900 truncate">
-            {other?.name ?? "Unknown user"}
+            {isGroup
+              ? (conversation.name ?? "Placement thread")
+              : (other?.name ?? "Unknown user")}
           </p>
-          {other?.role && (
-            <p className="text-xs text-gray-400 capitalize">
-              {other.role.toLowerCase()}
+          {isGroup ? (
+            <p className="text-xs text-gray-400 truncate">
+              You
+              {conversation.members.map((member) => `, ${member.name}`).join("")}
             </p>
+          ) : (
+            other?.role && (
+              <p className="text-xs text-gray-400 capitalize">
+                {other.role.toLowerCase()}
+              </p>
+            )
           )}
         </div>
+        {headerAction && <div className="shrink-0">{headerAction}</div>}
       </div>
+
+      <p className="flex items-center justify-center gap-1.5 px-4 py-1.5 text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100 shrink-0">
+        <Clock size={12} />
+        Messages are automatically deleted after {MESSAGE_RETENTION_DAYS} days.
+      </p>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
         {messages.length === 0 ? (
@@ -153,7 +186,15 @@ export default function MessageThread({
                         {message.content}
                       </div>
                       <span className="text-xs text-gray-400 px-1">
-                        {!isMine && other?.name ? `${other.name} · ` : ""}
+                        {/* Every message carries its own sender, so a group
+                            thread's bubbles are each attributed correctly. */}
+                        {!isMine
+                          ? `${message.sender.name}${
+                              isGroup
+                                ? ` (${message.sender.role.toLowerCase()})`
+                                : ""
+                            } · `
+                          : ""}
                         {formatMessageTimestamp(message.createdAt)}
                       </span>
                     </div>
@@ -165,38 +206,49 @@ export default function MessageThread({
         )}
       </div>
 
-      <div className="border-t border-gray-100 p-3 shrink-0">
-        <div className="flex items-end gap-2">
-          <div className="flex-1 border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              rows={1}
-              className="w-full resize-none outline-none px-3 py-2.5 text-sm text-gray-900 bg-transparent max-h-32"
-            />
-          </div>
-          <button
-            onClick={onSend}
-            disabled={!canSend}
-            aria-label="Send message"
-            className="h-10 w-10 shrink-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Send size={18} />
-          </button>
-        </div>
-        {nearLimit && (
-          <p
-            className={`text-xs mt-1 text-right ${overLimit ? "text-red-600" : "text-gray-400"}`}
-          >
-            {draft.length}/{maxMessageLength}
+      {conversation.readOnly ? (
+        // The server refuses the send regardless; this says why there is no box.
+        <div className="border-t border-gray-100 p-3 shrink-0">
+          <p className="flex items-center justify-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            <Lock size={15} className="shrink-0" />
+            This placement has ended, so its thread is read-only. No new
+            messages can be sent.
           </p>
-        )}
-        {isSending && (
-          <p className="text-xs text-gray-400 mt-1">Sending…</p>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="border-t border-gray-100 p-3 shrink-0">
+          <div className="flex items-end gap-2">
+            <div className="flex-1 border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type a message..."
+                rows={1}
+                className="w-full resize-none outline-none px-3 py-2.5 text-sm text-gray-900 bg-transparent max-h-32"
+              />
+            </div>
+            <button
+              onClick={onSend}
+              disabled={!canSend}
+              aria-label="Send message"
+              className="h-10 w-10 shrink-0 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+          {nearLimit && (
+            <p
+              className={`text-xs mt-1 text-right ${overLimit ? "text-red-600" : "text-gray-400"}`}
+            >
+              {draft.length}/{maxMessageLength}
+            </p>
+          )}
+          {isSending && (
+            <p className="text-xs text-gray-400 mt-1">Sending…</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { ConversationSummary } from "@/lib/api/messagesApi";
 import { useMessaging } from "../hooks/use-messaging";
 import ConversationList from "./ConversationList";
 import MessageThread from "./MessageThread";
@@ -11,7 +12,17 @@ import ContactPickerDialog from "./ContactPickerDialog";
  * On mobile only one pane shows at a time (list, or the open thread); both
  * show side by side from the md breakpoint up.
  */
-export default function MessagingView(props: ReturnType<typeof useMessaging>) {
+export default function MessagingView(
+  props: ReturnType<typeof useMessaging> & {
+    /**
+     * An action for the open thread's header, given the conversation — how the
+     * supervisor's page puts "Raise concern" on a placement thread.
+     */
+    renderThreadAction?: (
+      conversation: ConversationSummary,
+    ) => React.ReactNode;
+  },
+) {
   const {
     currentUserId,
     conversations,
@@ -39,6 +50,7 @@ export default function MessagingView(props: ReturnType<typeof useMessaging>) {
     setContactSearch,
     onSelectContact,
     isCreatingConversation,
+    renderThreadAction,
   } = props;
 
   return (
@@ -68,6 +80,11 @@ export default function MessagingView(props: ReturnType<typeof useMessaging>) {
         onSend={onSend}
         maxMessageLength={maxMessageLength}
         onBack={onBackToList}
+        headerAction={
+          activeConversation && renderThreadAction
+            ? renderThreadAction(activeConversation)
+            : undefined
+        }
         className={`flex-1 bg-white rounded-2xl shadow-sm overflow-hidden ${
           activeConversationId ? "flex" : "hidden md:flex"
         }`}

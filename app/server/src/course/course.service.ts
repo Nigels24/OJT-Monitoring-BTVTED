@@ -88,16 +88,22 @@ export class CourseService {
   async removeCourse(id: string) {
     await this.getCourseOrThrow(id);
 
-    const [students, blocks, requirements] = await Promise.all([
+    const [students, blocks, requirements, announcements] = await Promise.all([
       this.prisma.client.student.count({ where: { courseId: id } }),
       this.prisma.client.block.count({ where: { courseId: id } }),
       this.prisma.client.courseRequirement.count({ where: { courseId: id } }),
+      // An announcement limited to this program: deleting the course would
+      // either be refused by the FK or (were it SET NULL) widen its audience.
+      this.prisma.client.announcement.count({ where: { courseId: id } }),
     ]);
 
     const blockers: string[] = [];
     if (students > 0) blockers.push(`${students} student(s)`);
     if (blocks > 0) blockers.push(`${blocks} block(s)`);
     if (requirements > 0) blockers.push(`${requirements} requirement(s)`);
+    if (announcements > 0) {
+      blockers.push(`${announcements} announcement(s)`);
+    }
 
     if (blockers.length > 0) {
       throw new ConflictException(
@@ -267,14 +273,19 @@ export class CourseService {
       throw new NotFoundException('Block not found');
     }
 
-    const [students, assignments] = await Promise.all([
+    const [students, assignments, announcements] = await Promise.all([
       this.prisma.client.student.count({ where: { blockId: id } }),
       this.prisma.client.trainingAssignment.count({ where: { blockId: id } }),
+      // See removeCourse: an announcement limited to this block blocks it.
+      this.prisma.client.announcement.count({ where: { blockId: id } }),
     ]);
 
     const blockers: string[] = [];
     if (students > 0) blockers.push(`${students} student(s)`);
     if (assignments > 0) blockers.push(`${assignments} training assignment(s)`);
+    if (announcements > 0) {
+      blockers.push(`${announcements} announcement(s)`);
+    }
 
     if (blockers.length > 0) {
       throw new ConflictException(

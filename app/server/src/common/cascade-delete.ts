@@ -113,6 +113,30 @@ export async function deleteStudentCascade(
     where: { weeklyTask: { studentId } },
   });
   await tx.weeklyTask.deleteMany({ where: { studentId } });
+  // Concerns are "kept permanently" — against retention and against a
+  // supervisor leaving — but they are records *about this student on this
+  // placement*, and deleting the student is the explicit full removal of both.
+  // They also hold a hard FK to TrainingAssignment, so they go before it.
+  await tx.concern.deleteMany({ where: { studentId } });
+  // Each placement's group thread goes with its placement: the thread has no
+  // meaning without it, and Conversation.trainingAssignmentId would otherwise
+  // be silently nulled, leaving a nameless group conversation behind.
+  // Everyone's messages in it are deleted, not only the student's — which is
+  // why this cannot be left to deleteMessagingFootprint below.
+  const placementThreads = await tx.conversation.findMany({
+    where: { trainingAssignment: { studentId } },
+    select: { id: true },
+  });
+  if (placementThreads.length > 0) {
+    const threadIds = placementThreads.map((thread) => thread.id);
+    await tx.message.deleteMany({
+      where: { conversationId: { in: threadIds } },
+    });
+    await tx.conversationParticipant.deleteMany({
+      where: { conversationId: { in: threadIds } },
+    });
+    await tx.conversation.deleteMany({ where: { id: { in: threadIds } } });
+  }
   // TrainingAssignment.studentId is onDelete: Restrict, so this must run
   // before tx.student.delete below or that delete aborts on a leftover row.
   // Deleting the student is an explicit full removal — their assignments
@@ -121,6 +145,8 @@ export async function deleteStudentCascade(
   await tx.trainingAssignment.deleteMany({ where: { studentId } });
 
   await deleteMessagingFootprint(tx, userId);
+  // Read receipts hold a hard FK to User and have no onDelete: Cascade.
+  await tx.announcementRead.deleteMany({ where: { userId } });
 
   // Student and User are separate rows; removing only the profile would
   // strand a login with no profile.
@@ -144,6 +170,14 @@ export async function deleteStudentCascade(
  * verification), not the supervisor's. `WeeklyTask.supervisorId` is nullable
  * for exactly this. No files are removed, so nothing is returned.
  *
+ * Concerns they raised are **kept** too — a concern is a permanent record
+ * against the placement — and lose only the link: `Concern.raisedById` is
+ * nulled, while `raisedByName` still says who raised it.
+ *
+ * Their place in each placement's group thread goes with their messaging
+ * footprint below (participant rows, and the messages they sent); the thread
+ * itself stays for the student and the coordinators.
+ *
  * Attendance they actioned is **kept** and merely loses its approver: a
  * student's approved hours are their own record and must survive their
  * supervisor leaving the establishment. `Attendance.approvedById` is nullable
@@ -166,8 +200,13 @@ export async function deleteSupervisorCascade(
     where: { supervisorId },
     data: { supervisorId: null },
   });
+  await tx.concern.updateMany({
+    where: { raisedById: supervisorId },
+    data: { raisedById: null },
+  });
 
   await deleteMessagingFootprint(tx, userId);
+  await tx.announcementRead.deleteMany({ where: { userId } });
 
   await tx.supervisor.delete({ where: { id: supervisorId } });
   await tx.user.delete({ where: { id: userId } });

@@ -18,6 +18,8 @@ import { NotificationModule } from './notification/notification.module';
 import { JournalModule } from './journal/journal.module';
 import { DocumentModule } from './document/document.module';
 import { WeeklyTaskModule } from './weekly-task/weekly-task.module';
+import { ConcernModule } from './concern/concern.module';
+import { AnnouncementModule } from './announcement/announcement.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { WeeklyTaskModule } from './weekly-task/weekly-task.module';
     JournalModule,
     DocumentModule,
     WeeklyTaskModule,
+    ConcernModule,
+    AnnouncementModule,
   ],
   controllers: [AppController],
   providers: [AppService],

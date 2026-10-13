@@ -45,6 +45,7 @@ import { SCHOOL_NAME } from '../common/school';
 import { generateTemporaryPassword } from '../common/temp-password';
 import { NotificationService } from '../notification/notification.service';
 import { OverdueSweepService } from '../notification/overdue-sweep.service';
+import { PlacementThreadService } from '../messages/placement-thread.service';
 import {
   daysPending,
   overdueAttendanceWhere,
@@ -88,6 +89,7 @@ export class CoordinatorService {
     private prisma: PrismaService,
     private notifications: NotificationService,
     private overdueSweep: OverdueSweepService,
+    private placementThreads: PlacementThreadService,
   ) {}
 
   /** Rejects an email or username already claimed by another account. */
@@ -258,6 +260,22 @@ export class CoordinatorService {
       },
       include: { supervisorProfile: true },
     });
+
+    // A new supervisor joins the group thread of every active placement at
+    // their establishment (CLAUDE.md §15). After the create rather than with
+    // it: the account is valid without this, and the boot-time sync repairs a
+    // miss, so a failure here must not fail the account creation.
+    try {
+      await this.placementThreads.addSupervisor(this.prisma.client, {
+        userId: user.id,
+        establishmentId: data.establishmentId,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Supervisor ${user.id} was created but not added to their placement threads: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
 
     const { password, ...result } = user;
     return { ...result, temporaryPassword };
@@ -1466,6 +1484,17 @@ export class CoordinatorService {
           startDate,
           endDate: null,
         },
+      });
+
+      // The placement's group thread — student, the establishment's
+      // supervisors, every coordinator — is created with the placement, in
+      // this transaction, so one never exists without the other. The previous
+      // assignment's thread is left as it is: it became read-only the moment
+      // that assignment was marked TRANSFERRED above.
+      await this.placementThreads.createForAssignment(tx, {
+        id: created.id,
+        studentUserId: student.userId,
+        establishmentId: data.establishmentId,
       });
 
       // Goal 3: the student and every supervisor at the new establishment.
