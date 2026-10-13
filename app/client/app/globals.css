@@ -24,3 +24,22 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * Printing. The only printed page is the official evaluation sheet
+ * (features/evaluation/components/EvaluationPrintView.tsx), which the school
+ * files on A4. The page itself hides its own toolbar with `print:hidden`; this
+ * block covers what a component cannot: the paper size, and the dark-mode
+ * colours above, which would otherwise print light text on white.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
+}

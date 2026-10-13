@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   Search,
   ChevronLeft,
@@ -5,6 +6,7 @@ import {
   Download,
   Eye,
   Loader2,
+  Printer,
   Star,
   Pencil,
   Trash2,
@@ -38,6 +40,12 @@ interface EvaluationListProps {
   onDownload?: (evaluation: Evaluation) => void;
   /** The row whose PDF is being generated, if any. */
   downloadingId?: string | null;
+  /**
+   * Where a row's print view lives. Each role has its own route (`proxy.ts`
+   * routes by role prefix), so the page supplies it; supplying it is what
+   * renders the print button.
+   */
+  printHref?: (evaluation: Evaluation) => string;
   canModify?: (evaluation: Evaluation) => boolean;
   emptyMessage?: string;
 }
@@ -62,6 +70,7 @@ export default function EvaluationList({
   onDelete,
   onDownload,
   downloadingId = null,
+  printHref,
   canModify,
   emptyMessage = "No evaluations yet.",
 }: EvaluationListProps) {
@@ -157,6 +166,16 @@ export default function EvaluationList({
             >
               <Eye size={14} />
             </button>
+            {printHref && (
+              <Link
+                href={printHref(r)}
+                className="p-1 md:p-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
+                aria-label={`Print ${r.student.user.name}'s evaluation sheet`}
+                title="Print sheet"
+              >
+                <Printer size={14} />
+              </Link>
+            )}
             {onDownload && (
               <button
                 onClick={() => onDownload(r)}

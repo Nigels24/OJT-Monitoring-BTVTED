@@ -2,7 +2,7 @@ import { Star, User, Building2, CalendarDays, IdCard } from "lucide-react";
 import ViewDialog from "@/components/ui/ViewDialog";
 import DetailItem from "@/components/ui/DetailItem";
 import { Evaluation } from "@/lib/api/evaluationApi";
-import { formatDateOnly } from "@/lib/format";
+import { formatDateOnly, formatGrade } from "@/lib/format";
 
 interface EvaluationViewDialogProps {
   open: boolean;
@@ -47,6 +47,35 @@ export default function EvaluationViewDialog({
               </span>
             </span>
           </div>
+
+          {/* The other half of the two-part assessment, read-only here. */}
+          {evaluation.trainingAssignment && (
+            <div className="rounded-lg border border-gray-200 p-4 flex items-center justify-between gap-4">
+              <div>
+                <span className="text-sm font-semibold text-gray-800">
+                  Coordinator Grade
+                </span>
+                <p className="text-xs text-gray-500">
+                  {evaluation.trainingAssignment.coordinatorGrade === null
+                    ? "Not recorded yet — for the OJT portfolio report and its presentation"
+                    : [
+                        "Recorded",
+                        evaluation.trainingAssignment.gradedBy
+                          ? `by ${evaluation.trainingAssignment.gradedBy.user.name}`
+                          : null,
+                        evaluation.trainingAssignment.gradedAt
+                          ? `on ${new Date(evaluation.trainingAssignment.gradedAt).toLocaleDateString()}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                </p>
+              </div>
+              <span className="text-xl font-bold text-gray-900 tabular-nums">
+                {formatGrade(evaluation.trainingAssignment.coordinatorGrade)}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
             <DetailItem

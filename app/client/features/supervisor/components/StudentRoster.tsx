@@ -9,6 +9,7 @@ import {
   useSetStudentStatusMutation,
 } from "@/lib/api/supervisorApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import { formatGrade } from "@/lib/format";
 
 interface StudentRosterProps {
   students: SupervisorStudent[];
@@ -97,6 +98,27 @@ export default function StudentRoster({
           />
         </div>
       ),
+    },
+    {
+      // Read-only: the coordinator records this, for the portfolio report and
+      // its presentation. Nothing here can change it.
+      key: "coordinatorGrade",
+      label: "Coordinator Grade",
+      render: (r) =>
+        r.coordinatorGrade === null ? (
+          <span className="text-gray-400">Not graded</span>
+        ) : (
+          <div>
+            <div className="font-semibold text-gray-900 tabular-nums">
+              {formatGrade(r.coordinatorGrade)}
+            </div>
+            {r.gradedBy && (
+              <div className="text-xs text-gray-500">
+                by {r.gradedBy.user.name}
+              </div>
+            )}
+          </div>
+        ),
     },
     {
       key: "status",

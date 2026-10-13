@@ -29,6 +29,14 @@ export const SCORE_LABELS: Readonly<Record<number, string>> = {
   1: 'NEEDS IMPROVEMENT',
 };
 
+/**
+ * The legend, highest first — the order it is printed in. Shared by every
+ * template version, so the blank sheet and a signed one print the same one.
+ */
+export const SCORE_SCALE: ReadonlyArray<{ value: number; label: string }> = [
+  5, 4, 3, 2, 1,
+].map((value) => ({ value, label: SCORE_LABELS[value] }));
+
 /* ---------------------------------------------------------------------------
  * The shape a template takes once it is read out of the database.
  *
@@ -201,11 +209,7 @@ export function sheetDefinition(template: SheetTemplate) {
         label: item.label,
       })),
     })),
-    /** Highest first, the order the legend is printed in. */
-    scale: [5, 4, 3, 2, 1].map((value) => ({
-      value,
-      label: SCORE_LABELS[value],
-    })),
+    scale: SCORE_SCALE,
     minScore: MIN_SCORE,
     maxScore: MAX_SCORE,
     maxTotalRating: templateMaxTotalRating(template),

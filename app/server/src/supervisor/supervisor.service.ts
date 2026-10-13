@@ -13,12 +13,14 @@ import {
   attendanceEstablishmentWhere,
 } from '../common/supervisor-scope';
 import {
+  SCORE_SCALE,
   SheetTemplate,
   buildSections,
   sheetDefinition,
   templateMaxTotalRating,
   totalRating,
 } from '../common/evaluation-scoring';
+import { GRADED_BY_SELECT } from '../common/assignment-grade';
 import { CASCADE_TRANSACTION_OPTIONS } from '../common/cascade-delete';
 import { EvaluationTemplateService } from '../evaluation-template/evaluation-template.service';
 import { NotificationService } from '../notification/notification.service';
@@ -265,6 +267,7 @@ export class SupervisorService {
         student: {
           include: { user: { select: { id: true, email: true, name: true } } },
         },
+        gradedBy: GRADED_BY_SELECT,
         attendances: {
           where: { status: { in: ['APPROVED', 'PENDING'] } },
           select: {
@@ -301,6 +304,14 @@ export class SupervisorService {
           ...student,
           assignmentId: assignment.id,
           assignmentStatus: assignment.status,
+          // Read-only here: the coordinator's grade for THIS placement, with
+          // who recorded it and when. `coordinatorGradeRemarks` is left out on
+          // purpose — the same call as a journal's `coordinatorRemarks`, the
+          // school's written feedback to its own student is not the
+          // supervisor's to read.
+          coordinatorGrade: assignment.coordinatorGrade,
+          gradedAt: assignment.gradedAt,
+          gradedBy: assignment.gradedBy,
           hasActiveAssignment: assignment.status === 'ACTIVE',
           completedHours: progress.approvedHours,
           requiredHours: progress.requiredHours,
@@ -808,6 +819,20 @@ export const EVALUATION_INCLUDE = {
       user: { select: { name: true } },
     },
   },
+  // The other half of the two-part assessment: the coordinator's grade for the
+  // placement this sheet was written for, so every role reading a sheet sees
+  // it alongside. `coordinatorGradeRemarks` is deliberately not selected — this
+  // include also serves the supervisor, who gets the grade but never the
+  // school's written remarks to its student. `null` for a legacy sheet with no
+  // assignment.
+  trainingAssignment: {
+    select: {
+      id: true,
+      coordinatorGrade: true,
+      gradedAt: true,
+      gradedBy: GRADED_BY_SELECT,
+    },
+  },
 } as const;
 
 /** An evaluation read with `EVALUATION_INCLUDE`. */
@@ -838,6 +863,9 @@ export function withSectionTotals<T extends EvaluationWithSheet>(
     ...rest,
     templateVersion: template.version,
     templateTitle: template.title,
+    // The printed 1-5 legend, so a view that prints the sheet does not keep a
+    // second copy of the wording.
+    scale: SCORE_SCALE,
     sections,
   };
 }

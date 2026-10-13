@@ -1,5 +1,6 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
 import { baseQueryWithAuth } from "./baseQuery";
+import type { Evaluation } from "./evaluationApi";
 
 /**
  * The signed-in student's own view of their record (`/student/*`).
@@ -59,7 +60,42 @@ export interface StudentDashboard {
     declinedCount: number;
   };
   recentAttendance: AttendanceRecord[];
+  /** Both halves of the two-part assessment, across every placement. */
+  assessment: {
+    grades: CoordinatorGradeRecord[];
+    evaluations: MyEvaluationSummary[];
+  };
   _count: { documents: number; credentials: number };
+}
+
+/**
+ * The coordinator's final grade for one of the student's placements — based on
+ * the OJT portfolio report and its presentation. Only graded placements are
+ * listed, so `coordinatorGrade` is always set.
+ */
+export interface CoordinatorGradeRecord {
+  id: string;
+  academicYear: string;
+  status: string;
+  startDate: string;
+  endDate: string | null;
+  /** 0-100 as a Decimal string — render it with `formatGrade`. */
+  coordinatorGrade: string;
+  coordinatorGradeRemarks: string | null;
+  gradedAt: string | null;
+  gradedBy: { id: string; user: { name: string } } | null;
+  establishment: { id: string; name: string };
+}
+
+/** One of the supervisor's evaluation sheets for this student, by total. */
+export interface MyEvaluationSummary {
+  id: string;
+  trainingAssignmentId: string | null;
+  totalRating: number;
+  maxTotalRating: number;
+  trainingEmployedAt: string | null;
+  evaluatorName: string | null;
+  createdAt: string;
 }
 
 export interface SubmitAttendanceRequest {
@@ -218,6 +254,10 @@ export const studentPortalApi = createApi({
       query: () => "/student/dashboard",
       providesTags: ["MyDashboard"],
     }),
+    /** One of the student's own evaluation sheets in full — the print view. */
+    getMyEvaluation: builder.query<Evaluation, string>({
+      query: (id) => `/student/evaluations/${id}`,
+    }),
     getMyAttendance: builder.query<AttendanceRecord[], void>({
       query: () => "/student/attendance",
       providesTags: ["MyAttendance"],
@@ -305,6 +345,7 @@ export const studentPortalApi = createApi({
 
 export const {
   useGetMyDashboardQuery,
+  useGetMyEvaluationQuery,
   useGetMyAttendanceQuery,
   useSubmitAttendanceMutation,
   useGetMyProfileQuery,

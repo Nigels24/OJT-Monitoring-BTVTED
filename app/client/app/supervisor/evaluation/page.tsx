@@ -120,6 +120,9 @@ export default function SupervisorEvaluationPage() {
             onEdit={startEdit}
             onDelete={setDeleteTarget}
             canModify={canModify}
+            printHref={(evaluation) =>
+              `/supervisor/evaluation/${evaluation.id}/print`
+            }
             emptyMessage="You haven't evaluated anyone yet."
           />
         </Card>

@@ -23,6 +23,7 @@ import {
 import { useGetMyDashboardQuery } from "@/lib/api/studentPortalApi";
 import { STUDENT_NAV } from "@/features/student-portal/nav";
 import AttendanceTable from "@/features/student-portal/components/AttendanceTable";
+import AssessmentCard from "@/features/student-portal/components/AssessmentCard";
 
 export default function StudentDashboardPage() {
   const { data, isLoading, error } = useGetMyDashboardQuery();
@@ -104,6 +105,8 @@ export default function StudentDashboardPage() {
                   ` ${data.stats.pendingHours} more hours are awaiting approval.`}
               </p>
             </Card>
+
+            <AssessmentCard assessment={data.assessment} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
               <Card className="lg:col-span-1">

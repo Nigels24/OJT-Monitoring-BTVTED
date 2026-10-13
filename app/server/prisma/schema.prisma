@@ -247,9 +247,12 @@ model TrainingAssignment {
   academicYear        String
   status              AssignmentStatus   @default(ACTIVE)
 
-  // Set by the coordinator once, after the assignment ends. Separate from the
-  // supervisor's per-sheet Evaluation.totalRating — this is the coordinator's
-  // own final grade for the whole placement, not a rubric score.
+  // The coordinator's own final grade for the whole placement (0-100), based
+  // on the OJT portfolio report and its presentation. Separate from the
+  // supervisor's per-sheet Evaluation.totalRating — not a rubric score.
+  // Recorded once the assignment has ended or its approved hours reach
+  // requiredHours, and correctable afterwards; gradedById/gradedAt are stamped
+  // server-side and describe the grade as it stands (CLAUDE.md §13).
   coordinatorGrade        Decimal?     @db.Decimal(5, 2)
   coordinatorGradeRemarks String?
   gradedById              String?

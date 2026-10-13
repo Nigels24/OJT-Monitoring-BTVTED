@@ -78,6 +78,14 @@ export interface SupervisorStudent {
   assignmentId: string;
   assignmentStatus: "ACTIVE" | "COMPLETED" | "TRANSFERRED" | "CANCELLED";
   hasActiveAssignment: boolean;
+  /**
+   * The coordinator's final grade for that same assignment — read-only here,
+   * `null` until one is recorded. A Decimal string; render it with
+   * `formatGrade`. The coordinator's remarks are never sent to a supervisor.
+   */
+  coordinatorGrade: string | null;
+  gradedAt: string | null;
+  gradedBy: { id: string; user: { name: string } } | null;
 }
 
 export const supervisorApi = createApi({

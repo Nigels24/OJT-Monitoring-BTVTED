@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -22,6 +23,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Matches,
@@ -33,6 +35,7 @@ import {
 import { CoordinatorService } from './coordinator.service';
 import { Roles, RolesGuard } from '../auth/roles.guard';
 import { AuthedRequest } from '../auth/authed-request';
+import { GRADE_MAX, GRADE_MIN } from '../common/assignment-grade';
 import {
   EmptyToNull,
   EmptyToUndefined,
@@ -337,6 +340,32 @@ class UpdateAssignmentDto {
   status?: 'COMPLETED' | 'CANCELLED';
 }
 
+/**
+ * The coordinator's final grade for a placement. `gradedById` and `gradedAt`
+ * are absent on purpose: the server stamps both, and `forbidNonWhitelisted`
+ * rejects a body that tries to supply them.
+ */
+class SetAssignmentGradeDto {
+  // Decimal(5,2) in the schema — 0-100 with at most two decimal places. No
+  // transform: the form sends a JSON number, and an empty box must be a 400
+  // rather than a recorded grade of 0.
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'grade must be a number with at most 2 decimal places' },
+  )
+  @Min(GRADE_MIN)
+  @Max(GRADE_MAX)
+  grade!: number;
+
+  // Nullable column, so EmptyToNull: clearing the box clears the remarks.
+  // Absent from the body still means "leave unchanged".
+  @IsOptional()
+  @EmptyToNull()
+  @IsString()
+  @MaxLength(2000)
+  remarks?: string | null;
+}
+
 @Controller('coordinator')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('COORDINATOR')
@@ -467,6 +496,20 @@ export class CoordinatorController {
   @Patch('assignments/:id')
   updateAssignment(@Param('id') id: string, @Body() dto: UpdateAssignmentDto) {
     return this.coordinatorService.updateAssignment(id, dto);
+  }
+
+  /**
+   * Records or corrects the coordinator's grade for one placement. PUT, since
+   * it sets the whole grade (and is safe to repeat) whether or not one exists
+   * yet. See `CoordinatorService.setAssignmentGrade` for who may and when.
+   */
+  @Put('assignments/:id/grade')
+  setAssignmentGrade(
+    @Req() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() dto: SetAssignmentGradeDto,
+  ) {
+    return this.coordinatorService.setAssignmentGrade(req.user.userId, id, dto);
   }
 
   // Recovery for a forgotten password. No current password required — see

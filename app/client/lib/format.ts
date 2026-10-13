@@ -34,6 +34,21 @@ export function formatWeekdayOnly(
   });
 }
 
+/**
+ * The coordinator's grade as it is recorded: always two decimal places.
+ *
+ * It arrives as a string because it is a Decimal(5,2) server-side; going
+ * through `Number` only to format is safe at that precision.
+ */
+export function formatGrade(
+  grade: string | number | null | undefined,
+  fallback = "\u2014",
+): string {
+  if (grade === null || grade === undefined || grade === "") return fallback;
+  const value = Number(grade);
+  return Number.isFinite(value) ? value.toFixed(2) : fallback;
+}
+
 const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 365 * 24 * 60 * 60],
   ["month", 30 * 24 * 60 * 60],

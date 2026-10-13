@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/studentApi";
 import { formatDateOnly } from "@/lib/format";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import CoordinatorGradeCard from "./CoordinatorGradeCard";
 
 const STATUS_VARIANT: Record<AssignmentStatus, BadgeVariant> = {
   ACTIVE: "active",
@@ -196,6 +197,8 @@ export default function TrainingAssignmentsPanel({
               </button>
             </div>
           )}
+
+          <CoordinatorGradeCard assignment={a} />
         </div>
       ))}
     </div>

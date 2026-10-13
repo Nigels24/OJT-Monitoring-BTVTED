@@ -25,6 +25,7 @@ import {
   progressFromRows,
   ZERO_ASSIGNMENT_PROGRESS,
 } from '../common/assignment-progress';
+import { GRADED_BY_SELECT, gradeEligibility } from '../common/assignment-grade';
 import {
   EVALUATION_INCLUDE,
   withSectionTotals,
@@ -1510,7 +1511,15 @@ export class CoordinatorService {
     return { ...result.created, progress: result.progress };
   }
 
-  /** Every assignment a student has ever had, newest first, with progress. */
+  /**
+   * Every assignment a student has ever had, newest first, with progress.
+   *
+   * Each row also carries both halves of the two-part assessment: the
+   * supervisor's evaluation sheets written for that placement (totals only —
+   * the full sheet is `GET /coordinator/evaluations`), and the coordinator's own
+   * grade with who recorded it and when. `grading` says whether a grade can be
+   * recorded yet, decided by the same function `setAssignmentGrade` enforces.
+   */
   async listAssignments(studentId: string) {
     const student = await this.prisma.client.student.findUnique({
       where: { id: studentId },
@@ -1522,16 +1531,123 @@ export class CoordinatorService {
 
     const assignments = await this.prisma.client.trainingAssignment.findMany({
       where: { studentId },
-      include: { establishment: { select: { id: true, name: true } } },
+      include: ASSIGNMENT_ASSESSMENT_INCLUDE,
       orderBy: { startDate: 'desc' },
     });
 
     return Promise.all(
-      assignments.map(async (assignment) => ({
-        ...assignment,
-        progress: await computeProgress(this.prisma.client, assignment.id),
-      })),
+      assignments.map(async (assignment) => {
+        const progress = await computeProgress(
+          this.prisma.client,
+          assignment.id,
+        );
+        return {
+          ...assignment,
+          progress,
+          grading: gradeEligibility(assignment, progress),
+        };
+      }),
     );
+  }
+
+  /**
+   * Records, or corrects, the coordinator's final grade for one placement —
+   * based on the OJT portfolio report and its presentation, and separate from
+   * the supervisor's evaluation sheet, which this never touches.
+   *
+   * **Who may grade.** Any coordinator, not only the one whose block the
+   * assignment is in. That is the existing rule, not a new one: "My Block" is a
+   * view default and never an authorization boundary (CLAUDE.md §2), and every
+   * other coordinator write — journal review, document review, placements — is
+   * program-wide in the same way. `gradedById` records which coordinator it
+   * was.
+   *
+   * **When.** Only once the placement has ended or its approved hours reach the
+   * requirement (`gradeEligibility`); 400 otherwise.
+   *
+   * `gradedById`/`gradedAt` are stamped here, never read from the body, and are
+   * restamped on a correction so they always describe the grade as it stands.
+   * Saving the same grade and remarks again changes nothing and notifies no
+   * one, which is what makes a double-click a no-op.
+   */
+  async setAssignmentGrade(
+    userId: string,
+    assignmentId: string,
+    data: { grade: number; remarks?: string | null },
+  ) {
+    const coordinator = await this.getCoordinatorByUserId(userId);
+
+    const assignment = await this.prisma.client.trainingAssignment.findUnique({
+      where: { id: assignmentId },
+      include: {
+        ...ASSIGNMENT_ASSESSMENT_INCLUDE,
+        student: { select: { userId: true } },
+      },
+    });
+    if (!assignment) {
+      throw new NotFoundException('Training assignment not found');
+    }
+
+    const progress = await computeProgress(this.prisma.client, assignmentId);
+    const grading = gradeEligibility(assignment, progress);
+    if (!grading.eligible) {
+      throw new BadRequestException(grading.reason);
+    }
+
+    // `undefined` = remarks not in the request, leave them as they are.
+    const remarks =
+      data.remarks === undefined
+        ? assignment.coordinatorGradeRemarks
+        : data.remarks;
+    const isCorrection = assignment.coordinatorGrade !== null;
+    const unchanged =
+      isCorrection &&
+      Number(assignment.coordinatorGrade) === data.grade &&
+      assignment.coordinatorGradeRemarks === remarks;
+
+    const { student, ...current } = assignment;
+    if (unchanged) {
+      return { ...current, progress, grading };
+    }
+
+    const gradedAt = new Date();
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const saved = await tx.trainingAssignment.update({
+        where: { id: assignmentId },
+        data: {
+          coordinatorGrade: data.grade,
+          coordinatorGradeRemarks: remarks,
+          gradedById: coordinator.id,
+          gradedAt,
+        },
+        include: ASSIGNMENT_ASSESSMENT_INCLUDE,
+      });
+
+      // Committed with the grade itself: a notification for a grade that then
+      // rolled back would point the student at nothing.
+      await this.notifications.notify(tx, {
+        userIds: [student.userId],
+        type: 'ASSESSMENT_COMPLETED',
+        title: isCorrection
+          ? 'Coordinator grade updated'
+          : 'Coordinator grade recorded',
+        body:
+          `Your OJT coordinator ${isCorrection ? 'updated' : 'recorded'} your final grade ` +
+          `for your placement at ${assignment.establishment.name}: ${data.grade.toFixed(2)}.`,
+        link: '/student/dashboard',
+        entityType: 'TrainingAssignment',
+        entityId: assignmentId,
+        // `gradedAt` is the version marker: it only moves when the grade or
+        // its remarks actually change (see `unchanged` above), so a repeated
+        // save never reaches here, while a real correction is a new event and
+        // notifies again.
+        dedupeKey: `grade:${assignmentId}:${gradedAt.toISOString()}`,
+      });
+
+      return saved;
+    });
+
+    return { ...updated, progress, grading };
   }
 
   /**
@@ -1565,6 +1681,26 @@ export class CoordinatorService {
     });
   }
 }
+
+/**
+ * What an assignment row carries for the two-part assessment: where it was, who
+ * recorded the coordinator's grade, and the totals of the supervisor's sheets
+ * for that placement, newest first.
+ */
+const ASSIGNMENT_ASSESSMENT_INCLUDE = {
+  establishment: { select: { id: true, name: true } },
+  gradedBy: GRADED_BY_SELECT,
+  evaluations: {
+    select: {
+      id: true,
+      totalRating: true,
+      maxTotalRating: true,
+      evaluatorName: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'desc' },
+  },
+} as const;
 
 const MS_PER_WEEK = 7 * MS_PER_DAY;
 

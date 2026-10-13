@@ -26,6 +26,11 @@ import {
 } from '../common/file-upload';
 import { buildObjectPath, deleteFile, uploadFile } from '../common/storage';
 import { extensionOf, withSignedUrl } from '../common/signed-url';
+import { GRADED_BY_SELECT } from '../common/assignment-grade';
+import {
+  EVALUATION_INCLUDE,
+  withSectionTotals,
+} from '../supervisor/supervisor.service';
 
 interface SubmitAttendanceInput {
   date: string;
@@ -144,6 +149,7 @@ export class StudentService {
 
     return {
       ...profile,
+      assessment: await this.getAssessment(student.id),
       stats: {
         hasActiveAssignment: activeAssignment !== null,
         completedHours: progress.approvedHours,
@@ -162,6 +168,75 @@ export class StudentService {
       },
       recentAttendance: attendances.slice(0, 5).map(withHours),
     };
+  }
+
+  /**
+   * The student's two-part assessment, across every placement they have had.
+   *
+   * `grades` is one row per placement the coordinator has graded — absent, not
+   * a zero, until then. They are not limited to the ACTIVE assignment like the
+   * hour figures above: a grade is usually recorded after the placement has
+   * closed, which is exactly when it stops being the active one.
+   *
+   * `evaluations` lists the supervisor's sheets by total only; the full sheet
+   * is `getEvaluation`. Kept flat rather than nested under a placement because
+   * a legacy sheet has no assignment to hang from.
+   */
+  private async getAssessment(studentId: string) {
+    const grades = await this.prisma.client.trainingAssignment.findMany({
+      where: { studentId, coordinatorGrade: { not: null } },
+      select: {
+        id: true,
+        academicYear: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        coordinatorGrade: true,
+        coordinatorGradeRemarks: true,
+        gradedAt: true,
+        gradedBy: GRADED_BY_SELECT,
+        establishment: { select: { id: true, name: true } },
+      },
+      orderBy: { startDate: 'desc' },
+    });
+    const evaluations = await this.prisma.client.evaluation.findMany({
+      where: { studentId },
+      select: {
+        id: true,
+        trainingAssignmentId: true,
+        totalRating: true,
+        maxTotalRating: true,
+        trainingEmployedAt: true,
+        evaluatorName: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { grades, evaluations };
+  }
+
+  /**
+   * One of the student's own evaluation sheets in full, for the print view.
+   *
+   * Rendered from the template version it was signed on, the same as the
+   * supervisor's and coordinator's reads (`EVALUATION_INCLUDE`). Ownership is
+   * re-derived from the JWT — the id in the path proves nothing.
+   */
+  async getEvaluation(userId: string, evaluationId: string) {
+    const student = await this.getStudentByUserId(userId);
+
+    const evaluation = await this.prisma.client.evaluation.findUnique({
+      where: { id: evaluationId },
+      include: EVALUATION_INCLUDE,
+    });
+    if (!evaluation) {
+      throw new NotFoundException('Evaluation not found');
+    }
+    if (evaluation.studentId !== student.id) {
+      throw new ForbiddenException('This evaluation does not belong to you');
+    }
+
+    return { ...withSectionTotals(evaluation), canModify: false };
   }
 
   async submitAttendance(userId: string, data: SubmitAttendanceInput) {

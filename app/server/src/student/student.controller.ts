@@ -107,6 +107,12 @@ export class StudentController {
     return this.studentService.getAttendanceHistory(req.user.userId);
   }
 
+  /** One of the student's own evaluation sheets, in full — the print view. */
+  @Get('evaluations/:id')
+  getEvaluation(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.studentService.getEvaluation(req.user.userId, id);
+  }
+
   @Get('profile')
   getProfile(@Req() req: AuthedRequest) {
     return this.studentService.getProfile(req.user.userId);

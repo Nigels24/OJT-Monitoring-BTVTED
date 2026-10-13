@@ -76,6 +76,8 @@ export interface Evaluation {
   /** The template version this sheet was signed on, and its title. */
   templateVersion: number;
   templateTitle: string;
+  /** The printed legend, highest first: 5 OUTSTANDING … 1 NEEDS IMPROVEMENT. */
+  scale: { value: number; label: string }[];
   sections: ScoredSection[];
   trainingStartedAt: string | null;
   trainingEndedAt: string | null;
@@ -106,6 +108,19 @@ export interface Evaluation {
     position: string | null;
     user: { name: string };
   };
+  /**
+   * The placement this sheet was written for, with the other half of the
+   * two-part assessment: the coordinator's grade (a Decimal string — render it
+   * with `formatGrade`), `null` until one is recorded. The coordinator's
+   * remarks are not here; the server never sends them with a sheet. The whole
+   * object is `null` for a legacy sheet with no placement.
+   */
+  trainingAssignment: {
+    id: string;
+    coordinatorGrade: string | null;
+    gradedAt: string | null;
+    gradedBy: { id: string; user: { name: string } } | null;
+  } | null;
 }
 
 /**

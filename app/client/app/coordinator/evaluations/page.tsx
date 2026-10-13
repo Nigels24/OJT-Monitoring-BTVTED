@@ -168,6 +168,9 @@ export default function CoordinatorEvaluationsPage() {
                 void downloadEvaluation(evaluation);
               }}
               downloadingId={downloadingId}
+              printHref={(evaluation) =>
+                `/coordinator/evaluations/${evaluation.id}/print`
+              }
               emptyMessage="No supervisor has submitted an evaluation yet."
             />
           </Card>

@@ -43,13 +43,42 @@ export interface TrainingAssignment {
   endDate: string | null;
   academicYear: string;
   status: AssignmentStatus;
+  /**
+   * The coordinator's final grade for this placement, 0-100. A string because
+   * it is a Decimal(5,2) server-side — render it with `formatGrade`.
+   */
   coordinatorGrade: string | null;
   coordinatorGradeRemarks: string | null;
   gradedById: string | null;
+  gradedBy: { id: string; user: { name: string } } | null;
   gradedAt: string | null;
   createdAt: string;
   updatedAt: string;
   progress: AssignmentProgress;
+  /**
+   * Whether a grade can be recorded yet (the placement has ended, or its
+   * approved hours reach the requirement). Decided server-side by the same rule
+   * the save enforces; `reason` says why not.
+   */
+  grading: { eligible: boolean; reason: string | null };
+  /** The supervisor's sheets for this placement, newest first — totals only. */
+  evaluations: AssignmentEvaluationSummary[];
+}
+
+/** One supervisor evaluation sheet, as much as an assignment row needs of it. */
+export interface AssignmentEvaluationSummary {
+  id: string;
+  totalRating: number;
+  maxTotalRating: number;
+  evaluatorName: string | null;
+  createdAt: string;
+}
+
+export interface SetAssignmentGradeRequest {
+  /** 0-100, at most two decimal places. */
+  grade: number;
+  /** `null` clears the remarks; omit to leave them unchanged. */
+  remarks?: string | null;
 }
 
 /** `GET /coordinator/students/:id/placement-defaults` — the auto-filled hours
@@ -322,6 +351,31 @@ export const studentApi = createApi({
       }),
       invalidatesTags: ["Student", "Assignment"],
     }),
+    /**
+     * Records or corrects the coordinator's grade for one placement. The same
+     * call for both — the server stamps who and when.
+     */
+    setAssignmentGrade: builder.mutation<
+      TrainingAssignment,
+      { id: string } & SetAssignmentGradeRequest
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/coordinator/assignments/${id}/grade`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: ["Assignment"],
+      // Every evaluation row carries its placement's grade too, and those live
+      // in another slice whose tags this mutation can't reach on its own.
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled;
+          dispatch(evaluationApi.util.invalidateTags(["Evaluation"]));
+        } catch {
+          // Save failed — nothing else to invalidate.
+        }
+      },
+    }),
   }),
 });
 
@@ -335,4 +389,5 @@ export const {
   useCreatePlacementMutation,
   useGetAssignmentsQuery,
   useUpdateAssignmentMutation,
+  useSetAssignmentGradeMutation,
 } = studentApi;
