@@ -65,7 +65,7 @@ export default function JournalDetailDialog({
       align="stretch"
       closeOnBackdrop={!review}
     >
-      <div className="bg-white md:rounded-xl shadow-2xl w-full md:max-w-2xl md:max-h-[90vh] overflow-y-auto flex flex-col">
+      <div className="bg-white md:rounded-xl shadow-2xl w-full md:max-w-2xl md:max-h-[90dvh] overflow-y-auto flex flex-col">
         <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200 sticky top-0 bg-white">
           <div className="flex items-center gap-2">
             <NotebookPen size={20} className="text-blue-600" />

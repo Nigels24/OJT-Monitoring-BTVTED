@@ -27,6 +27,16 @@ const prisma = new PrismaClient();
 async function main() {
   const [passwordArg, identifierArg] = process.argv.slice(2);
 
+  // Checked before anything is read or written, and against `undefined` rather
+  // than truthiness: `''` is falsy, so it used to skip the length check below
+  // and then survive `??` as the new password. Only a missing argument means
+  // "generate one".
+  if (passwordArg !== undefined && passwordArg.trim() === '') {
+    throw new Error(
+      'The password cannot be empty or only spaces. Leave the argument out to have one generated.',
+    );
+  }
+
   const coordinators = await prisma.user.findMany({
     where: { role: 'COORDINATOR' },
     select: { id: true, email: true, username: true, name: true },
@@ -60,7 +70,7 @@ async function main() {
     );
   }
 
-  if (passwordArg && passwordArg.length < MIN_LENGTH) {
+  if (passwordArg !== undefined && passwordArg.length < MIN_LENGTH) {
     throw new Error(
       `Password must be at least ${MIN_LENGTH} characters (the app enforces the same).`,
     );
@@ -78,15 +88,17 @@ async function main() {
       // operator who passed their own password on the command line already
       // made a deliberate choice, same as a coordinator typing one into the
       // student/supervisor create form instead of leaving it blank.
-      mustChangePassword: !passwordArg,
+      mustChangePassword: passwordArg === undefined,
     },
   });
 
   console.log(`Password reset for ${target.name}:`);
-  console.log(`  username  ${target.username ?? '(none — sign in with email)'}`);
+  console.log(
+    `  username  ${target.username ?? '(none — sign in with email)'}`,
+  );
   console.log(`  email     ${target.email}`);
   console.log(`  password  ${password}`);
-  if (!passwordArg) {
+  if (passwordArg === undefined) {
     console.log(
       '\nThis password was generated. Sign in and change it from the sidebar.',
     );

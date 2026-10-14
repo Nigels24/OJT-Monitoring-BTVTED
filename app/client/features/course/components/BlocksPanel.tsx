@@ -270,7 +270,7 @@ function RowForm({
           value={row.name}
           onChange={(e) => setRow({ ...row, name: e.target.value })}
           placeholder="Block A"
-          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm"
+          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
         />
       </td>
       <td className="py-2 pr-2">
@@ -280,7 +280,7 @@ function RowForm({
           value={row.yearLevel}
           onChange={(e) => setRow({ ...row, yearLevel: e.target.value })}
           placeholder="Year"
-          className="w-16 h-8 px-2 border border-gray-300 rounded-md text-sm"
+          className="w-16 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
         />
       </td>
       <td className="py-2 pr-2">
@@ -288,7 +288,7 @@ function RowForm({
           value={row.academicYear}
           onChange={(e) => setRow({ ...row, academicYear: e.target.value })}
           placeholder="2025-2026"
-          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm"
+          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
         />
       </td>
       <td className="py-2 pr-2">

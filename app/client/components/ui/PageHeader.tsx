@@ -31,11 +31,17 @@ export default function PageHeader({
   }, []);
 
   return (
-    <div className="flex items-start justify-between mb-6">
-      <div className="flex items-center gap-3">
-        <Icon size={28} className="text-white" />
-        <div>
-          <h1 className="text-2xl font-bold text-white">{title}</h1>
+    // Wraps rather than squeezes: the date and time drop under the title when
+    // there is no room beside it, and — as a flex item with a 16rem basis —
+    // this whole header gives a page's action buttons their own line before
+    // either is cut off.
+    <div className="flex flex-[1_1_16rem] min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-3 mb-6">
+      <div className="flex items-center gap-3 min-w-0">
+        <Icon size={28} className="text-white shrink-0" />
+        <div className="min-w-0">
+          <h1 className="text-xl md:text-2xl font-bold text-white break-words">
+            {title}
+          </h1>
           {subtitle && (
             <p className="text-white/80 text-sm mt-0.5">{subtitle}</p>
           )}
@@ -43,7 +49,7 @@ export default function PageHeader({
       </div>
 
       {showDateTime && now && (
-        <div className="text-right text-white">
+        <div className="text-left sm:text-right text-white">
           <p className="text-sm">
             {now.toLocaleDateString("en-US", {
               weekday: "long",

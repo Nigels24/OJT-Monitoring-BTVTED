@@ -54,7 +54,7 @@ export default function MessagingView(
   } = props;
 
   return (
-    <div className="flex-1 flex gap-4 min-h-0 h-[calc(100vh-220px)] min-h-[480px]">
+    <div className="flex-1 flex gap-4 min-h-0 h-[calc(100dvh-276px)] lg:h-[calc(100dvh-220px)] min-h-[420px]">
       <ConversationList
         conversations={conversations}
         isLoading={conversationsLoading}

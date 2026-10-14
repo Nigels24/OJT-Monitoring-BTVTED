@@ -24,15 +24,18 @@ export default function ViewDialog({
 }: ViewDialogProps) {
   return (
     <Overlay open={open} label={title} onClose={onClose}>
-      <div className="bg-white rounded-2xl p-4 md:p-6 max-w-2xl w-full max-h-[90vh] overflow-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            {Icon && <Icon size={24} className="text-blue-600" />}
-            <h2 className="text-xl font-bold text-gray-800">{title}</h2>
+      <div className="bg-white rounded-2xl p-4 md:p-6 max-w-2xl w-full max-h-[90dvh] overflow-auto">
+        <div className="flex items-start justify-between gap-3 mb-6">
+          <div className="flex items-center gap-3 min-w-0">
+            {Icon && <Icon size={24} className="shrink-0 text-blue-600" />}
+            <h2 className="text-lg md:text-xl font-bold text-gray-800 break-words min-w-0">
+              {title}
+            </h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+            className="shrink-0 p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700"
             aria-label="Close"
           >
             <X size={20} />

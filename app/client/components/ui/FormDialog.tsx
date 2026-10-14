@@ -47,7 +47,7 @@ export default function FormDialog({
       closeOnBackdrop={false}
       align="stretch"
     >
-      <div className="bg-white w-full h-full md:h-auto md:max-h-[90vh] md:max-w-3xl md:rounded-2xl flex flex-col overflow-hidden">
+      <div className="bg-white w-full h-full md:h-auto md:max-h-[90dvh] md:max-w-3xl md:rounded-2xl flex flex-col overflow-hidden">
         <div className="flex items-start justify-between gap-3 px-4 md:px-6 py-4 border-b border-gray-200 shrink-0">
           <div className="flex items-start gap-3 min-w-0">
             {Icon && <Icon size={22} className="text-blue-600 mt-0.5 shrink-0" />}

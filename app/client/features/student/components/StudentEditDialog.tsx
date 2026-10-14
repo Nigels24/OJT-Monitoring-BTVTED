@@ -1,7 +1,6 @@
 import { Users, X } from "lucide-react";
 import StudentForm from "./StudentForm";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
-import { Establishment } from "@/lib/api/establishmentApi";
 import { Block, Course } from "@/lib/api/courseApi";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
 import type { AddressValue } from "@/lib/hooks/use-address-picker";
@@ -14,7 +13,6 @@ interface StudentEditDialogProps {
   isCreating: boolean;
   isUpdating: boolean;
   error: string;
-  establishments: Establishment[];
   courses: Course[];
   yearLevelOptions: number[];
   blocks: Block[];
@@ -37,7 +35,6 @@ export default function StudentEditDialog({
   isCreating,
   isUpdating,
   error,
-  establishments,
   courses,
   yearLevelOptions,
   blocks,
@@ -59,7 +56,7 @@ export default function StudentEditDialog({
       onClose={onClose}
       closeOnBackdrop={false}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90dvh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2">
             <Users size={20} className="text-blue-600" />
@@ -83,7 +80,6 @@ export default function StudentEditDialog({
             isCreating={isCreating}
             isUpdating={isUpdating}
             error={error}
-            establishments={establishments}
             courses={courses}
             yearLevelOptions={yearLevelOptions}
             blocks={blocks}

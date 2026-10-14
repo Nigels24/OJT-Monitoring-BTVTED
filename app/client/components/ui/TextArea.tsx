@@ -28,7 +28,9 @@ export default function TextArea({
         )}
         <textarea
           {...rest}
-          className="flex-1 outline-none pr-3 py-3 text-gray-900 bg-transparent resize-none"
+          className={`flex-1 min-w-0 outline-none pr-3 py-3 text-gray-900 bg-transparent resize-none ${
+            FieldIcon ? "" : "pl-3"
+          }`}
         />
       </div>
     </div>

@@ -18,6 +18,7 @@ import type { TrainingStatus } from "@/features/reports/filters";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 import { credentialsEmailReason } from "@/lib/api/credentialsEmail";
 import type { AddressValue } from "@/lib/hooks/use-address-picker";
+import type { PlacementTarget } from "./use-placement";
 import { effectivePostalCode } from "@/lib/address/postal-codes";
 
 export const STATUS_OPTIONS: StudentStatus[] = [
@@ -48,9 +49,8 @@ const EMPTY_FORM = {
   courseId: "",
   courseYearLevel: "",
   blockId: "",
-  establishmentId: "",
-  requiredHours: "",
-  startDate: "",
+  // No establishment, required hours or start date: those belong to a
+  // placement (Record placement), not to the student record.
   status: "ACTIVE" as StudentStatus,
 };
 
@@ -166,6 +166,10 @@ export function useStudents() {
     /** Why it was not emailed — shown above the password. */
     reason: string;
   } | null>(null);
+  // The student just added, until the coordinator places them or dismisses
+  // the prompt. Built from the create response rather than looked up in the
+  // list, which the current scope or filters may not include them in.
+  const [justAdded, setJustAdded] = useState<PlacementTarget | null>(null);
 
   const { showSuccess, showError } = useSnackbar();
 
@@ -290,8 +294,10 @@ export function useStudents() {
    * server reads an *absent* field as "leave unchanged", so omitting them
    * would silently restore the old value on every edit.
    *
-   * `requiredHours` is the exception: it is NOT NULL server-side, so a blank
-   * stays omitted rather than becoming a null write.
+   * `establishmentId`, `requiredHours` and `startDate` are deliberately not
+   * sent. The server still accepts them and writes them to the deprecated
+   * mirrors on Student, but a placement is what they belong to — sending them
+   * from here set an establishment with no placement behind it.
    */
   const detailsPayload = () => ({
     firstName: form.firstName || null,
@@ -314,9 +320,6 @@ export function useStudents() {
     courseId: form.courseId || null,
     blockId: form.blockId || null,
     courseYearLevel: form.courseYearLevel ? Number(form.courseYearLevel) : null,
-    establishmentId: form.establishmentId || null,
-    requiredHours: form.requiredHours ? Number(form.requiredHours) : undefined,
-    startDate: form.startDate ? new Date(form.startDate).toISOString() : null,
     status: form.status,
   });
 
@@ -358,6 +361,13 @@ export function useStudents() {
           showSuccess(
             `"${result.name}" has been added. Give them the username and password you set.`,
           );
+        }
+        if (result.studentProfile) {
+          setJustAdded({
+            id: result.studentProfile.id,
+            blockId: result.studentProfile.blockId,
+            user: { name: result.name },
+          });
         }
       }
       closeDialog();
@@ -413,9 +423,6 @@ export function useStudents() {
       courseId: student.courseId ?? "",
       courseYearLevel: student.courseYearLevel?.toString() ?? "",
       blockId: student.blockId ?? "",
-      establishmentId: student.establishmentId ?? "",
-      requiredHours: student.requiredHours?.toString() ?? "",
-      startDate: student.startDate ? student.startDate.slice(0, 10) : "",
       status: student.status,
     });
     setIsDialogOpen(true);
@@ -479,6 +486,7 @@ export function useStudents() {
     editTarget,
     isDialogOpen,
     credentials,
+    justAdded,
     search,
     page,
     paged,
@@ -508,6 +516,9 @@ export function useStudents() {
     setViewTarget,
     closeCredentials: () => {
       setCredentials(null);
+    },
+    dismissJustAdded: () => {
+      setJustAdded(null);
     },
 
     handleSubmit,

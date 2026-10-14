@@ -195,7 +195,7 @@ export default function IdleSessionManager() {
       onClose={handleStaySignedIn}
       closeOnBackdrop={false}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[90dvh] overflow-y-auto flex flex-col">
         <div className="p-4 md:p-6 space-y-4">
           <div className="flex items-center gap-2">
             <ShieldAlert size={20} className="text-amber-600" />

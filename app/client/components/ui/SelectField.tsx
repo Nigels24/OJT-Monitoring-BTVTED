@@ -60,21 +60,36 @@ export default function SelectField({
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className="w-full h-11 px-4 pr-10 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        // The full label, for a closed control that had to cut it short.
+        title={selectedOption?.label}
+        className="w-full h-11 pl-4 pr-3 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer flex items-center justify-between gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        <span className={selectedOption ? "text-gray-900" : "text-gray-400"}>
+        {/* One line, always: the control is a fixed 44px tall, so a long
+            label (a course's full name) is cut with an ellipsis here and
+            shown whole in the open list below. `min-w-0` is what lets a flex
+            child shrink enough to truncate at all. */}
+        <span
+          className={`min-w-0 flex-1 truncate text-left ${
+            selectedOption ? "text-gray-900" : "text-gray-400"
+          }`}
+        >
           {selectedOption?.label || placeholder}
         </span>
         <ChevronDown
           size={16}
-          className={`text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+          className={`shrink-0 text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
         />
       </button>
 
       {isOpen && !disabled && (
         <div
           style={{ zIndex: Z_LAYERS.dropdown }}
-          className="absolute w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
+          role="listbox"
+          // Exactly as wide as the control, so it can never run off the
+          // screen; a long option wraps onto more lines here instead.
+          className="absolute left-0 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-auto"
         >
           {options.map((option) => (
             <button
@@ -82,7 +97,9 @@ export default function SelectField({
               type="button"
               disabled={option.disabled}
               onClick={() => !option.disabled && handleSelect(option.value)}
-              className={`w-full px-4 py-2.5 text-sm text-left transition-colors ${
+              role="option"
+              aria-selected={option.value === value}
+              className={`block w-full px-4 py-2.5 text-sm text-left break-words transition-colors ${
                 option.disabled
                   ? "text-gray-300 cursor-not-allowed"
                   : option.value === value

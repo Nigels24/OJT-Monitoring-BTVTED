@@ -50,6 +50,34 @@ export class SupervisorService {
     return supervisor;
   }
 
+  /**
+   * The name and address of the establishment this supervisor belongs to —
+   * what every supervisor page's sidebar shows. Its own small read rather than
+   * a field on `getDashboard`, so a page that is not the dashboard does not
+   * run the dashboard's aggregates to print a heading.
+   */
+  async getEstablishment(userId: string) {
+    const supervisor = await this.prisma.client.supervisor.findUnique({
+      where: { userId },
+      select: {
+        establishment: {
+          select: {
+            id: true,
+            name: true,
+            streetAddress: true,
+            barangay: true,
+            city: true,
+            province: true,
+          },
+        },
+      },
+    });
+    if (!supervisor) {
+      throw new NotFoundException('Supervisor profile not found');
+    }
+    return supervisor.establishment;
+  }
+
   async getDashboard(userId: string) {
     const supervisor = await this.prisma.client.supervisor.findUnique({
       where: { userId },

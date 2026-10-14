@@ -5,6 +5,11 @@ export interface DataTableColumn<T> {
   key: string;
   label: string;
   render: (row: T) => ReactNode;
+  /**
+   * Extra classes for this column's header and cells — chiefly to drop a
+   * secondary column on small screens (`hidden lg:table-cell`).
+   */
+  className?: string;
 }
 
 interface DataTableProps<T> {
@@ -50,7 +55,7 @@ export default function DataTable<T>({
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className="text-left font-semibold text-gray-700 pb-3 pr-4 whitespace-nowrap text-xs md:text-sm"
+                  className={`text-left font-semibold text-gray-700 pb-3 pr-4 whitespace-nowrap text-xs md:text-sm ${col.className ?? ""}`}
                 >
                   {col.label}
                 </th>
@@ -64,7 +69,10 @@ export default function DataTable<T>({
                 className="border-b border-gray-50 last:border-0"
               >
                 {columns.map((col) => (
-                  <td key={col.key} className="py-3 pr-4 text-gray-700 text-xs md:text-sm">
+                  <td
+                    key={col.key}
+                    className={`py-3 pr-4 text-gray-700 text-xs md:text-sm ${col.className ?? ""}`}
+                  >
                     {col.render(row)}
                   </td>
                 ))}

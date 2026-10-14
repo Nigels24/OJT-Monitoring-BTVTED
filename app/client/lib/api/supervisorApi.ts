@@ -55,6 +55,16 @@ export interface SupervisorDashboard {
   };
 }
 
+/** `GET /supervisor/establishment` — the sidebar's title and address. */
+export interface SupervisorEstablishment {
+  id: string;
+  name: string;
+  streetAddress: string | null;
+  barangay: string | null;
+  city: string | null;
+  province: string | null;
+}
+
 export interface SupervisorStudent {
   id: string;
   studentIdNumber: string;
@@ -96,6 +106,9 @@ export const supervisorApi = createApi({
     getSupervisorDashboard: builder.query<SupervisorDashboard, void>({
       query: () => "/supervisor/dashboard",
       providesTags: ["SupervisorDashboard"],
+    }),
+    getSupervisorEstablishment: builder.query<SupervisorEstablishment, void>({
+      query: () => "/supervisor/establishment",
     }),
     getSupervisorStudents: builder.query<SupervisorStudent[], void>({
       query: () => "/supervisor/students",
@@ -154,6 +167,7 @@ export const supervisorApi = createApi({
 
 export const {
   useGetSupervisorDashboardQuery,
+  useGetSupervisorEstablishmentQuery,
   useGetSupervisorStudentsQuery,
   useSetStudentStatusMutation,
   useGetSupervisorAttendanceQuery,

@@ -19,6 +19,8 @@ import {
   Clock,
   UserCheck,
   Printer,
+  MapPin,
+  X,
 } from "lucide-react";
 import { useStudents } from "@/features/student/hooks/use-students";
 import type { Student } from "@/lib/api/studentApi";
@@ -29,6 +31,7 @@ import StudentEditDialog from "@/features/student/components/StudentEditDialog";
 import ResendLoginDialog from "@/features/account/components/ResendLoginDialog";
 import StudentImportDialog from "@/features/student-import/components/StudentImportDialog";
 import PlacementDialog from "@/features/student/components/PlacementDialog";
+import type { PlacementTarget } from "@/features/student/hooks/use-placement";
 import { deleteStudentMessage } from "@/lib/format";
 
 export default function StudentManagementPage() {
@@ -45,7 +48,8 @@ function StudentManagementPageContent() {
   const currentUser = useCurrentUser();
   const [resetTarget, setResetTarget] = useState<Student | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [placementTarget, setPlacementTarget] = useState<Student | null>(null);
+  const [placementTarget, setPlacementTarget] =
+    useState<PlacementTarget | null>(null);
   const {
     form,
     error,
@@ -58,6 +62,7 @@ function StudentManagementPageContent() {
     editTarget,
     isDialogOpen,
     credentials,
+    justAdded,
     search,
     page,
     paged,
@@ -81,6 +86,7 @@ function StudentManagementPageContent() {
     setDeleteTarget,
     setViewTarget,
     closeCredentials,
+    dismissJustAdded,
     handleSubmit,
     handleDeleteConfirm,
     handleView,
@@ -90,16 +96,14 @@ function StudentManagementPageContent() {
   } = useStudents();
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50">
       <Sidebar
-        orgName="WPH Institute"
-        orgSubtitle="Barangay San Francisco"
         items={COORDINATOR_NAV}
         userName={currentUser?.name || "Coordinator"}
       />
 
-      <main className="flex-1 p-4 md:p-6">
-        <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
+        <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6 flex flex-wrap items-start justify-between gap-x-4">
           <PageHeader
             title="Student Management"
             subtitle="Manage OJT students, their assignments and progress"
@@ -154,6 +158,42 @@ function StudentManagementPageContent() {
             subtext="Finished program"
           />
         </div>
+
+        {/* A student is added without a placement. Offered here, and kept
+            until acted on — a toast would be gone before the credentials
+            dialog that can open over it is closed. */}
+        {justAdded && (
+          <div
+            role="status"
+            className="mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-green-300 bg-green-50 px-4 py-3"
+          >
+            <p className="flex-1 min-w-0 text-sm text-green-900">
+              <strong>{justAdded.user.name}</strong> was added and has no
+              placement yet.
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setPlacementTarget(justAdded);
+                  dismissJustAdded();
+                }}
+                className="inline-flex items-center gap-1.5 h-10 px-4 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold"
+              >
+                <MapPin size={16} />
+                Record placement now
+              </button>
+              <button
+                type="button"
+                onClick={dismissJustAdded}
+                aria-label="Dismiss"
+                className="w-10 h-10 flex items-center justify-center rounded-lg text-green-800 hover:bg-green-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <Card>
           <StudentFilterBar
@@ -257,7 +297,6 @@ function StudentManagementPageContent() {
         isCreating={isCreating}
         isUpdating={isUpdating}
         error={error}
-        establishments={establishments || []}
         courses={courses}
         yearLevelOptions={formYearLevelOptions}
         blocks={formBlocks}

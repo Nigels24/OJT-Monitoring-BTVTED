@@ -3,6 +3,14 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /*
+   * This app has one theme. Every surface is an explicit light colour
+   * (bg-white, bg-gray-50), so there is no dark variant to switch to — and
+   * `color-scheme: light` tells the browser the same, which keeps its own
+   * controls (date pickers, number spinners, autofill, scrollbars) light on a
+   * device set to dark mode.
+   */
+  color-scheme: light;
 }
 
 @theme inline {
@@ -12,12 +20,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/*
+ * There used to be a `prefers-color-scheme: dark` block here that turned
+ * --foreground near-white. Nothing else in the app followed it, so on a
+ * dark-mode device every element without its own text colour — a bare
+ * <input> on a white card, above all — inherited near-white text on a white
+ * background. Do not bring it back without a dark variant for every surface.
+ */
 
 body {
   background: var(--background);
@@ -26,11 +35,29 @@ body {
 }
 
 /*
+ * A form control takes the page's dark text unless a class says otherwise, so
+ * a field written without `text-gray-900` is still readable. In the base
+ * layer: any Tailwind text utility on the element wins.
+ */
+@layer base {
+  input,
+  select,
+  textarea {
+    color: #111827;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af;
+  }
+}
+
+/*
  * Printing. The only printed page is the official evaluation sheet
  * (features/evaluation/components/EvaluationPrintView.tsx), which the school
  * files on A4. The page itself hides its own toolbar with `print:hidden`; this
- * block covers what a component cannot: the paper size, and the dark-mode
- * colours above, which would otherwise print light text on white.
+ * block covers what a component cannot: the paper size, and plain black on
+ * white for the page itself.
  */
 @media print {
   @page {

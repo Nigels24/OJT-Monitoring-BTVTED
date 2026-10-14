@@ -90,20 +90,25 @@ export default function StudentList({
       key: "student",
       label: "Student",
       render: (r) => (
-        <div>
+        <div className="min-w-36">
           <div className="font-semibold text-gray-900">{r.user.name}</div>
-          <div className="text-xs text-gray-500">{r.user.email}</div>
+          <div className="text-xs text-gray-500 break-all">{r.user.email}</div>
         </div>
       ),
     },
     {
       key: "course",
       label: "Course",
+      // One line, cut with an ellipsis: a program's full name used to wrap
+      // one word per line in a column this narrow. The whole name is in the
+      // tooltip and in the student's details.
       render: (r) => (
-        <div>
-          <div>{r.course || "—"}</div>
+        <div className="w-40 xl:w-56">
+          <div className="truncate" title={r.course ?? undefined}>
+            {r.course || "—"}
+          </div>
           {r.yearLevel && (
-            <div className="text-xs text-gray-500">{r.yearLevel}</div>
+            <div className="text-xs text-gray-500 truncate">{r.yearLevel}</div>
           )}
         </div>
       ),
@@ -113,7 +118,9 @@ export default function StudentList({
       label: "Establishment",
       render: (r) =>
         r.hasActiveAssignment ? (
-          r.establishment?.name || "Unassigned"
+          <div className="w-36 truncate" title={r.establishment?.name}>
+            {r.establishment?.name || "Unassigned"}
+          </div>
         ) : (
           <span className="text-gray-400 italic">Not placed</span>
         ),
@@ -121,6 +128,8 @@ export default function StudentList({
     {
       key: "contactNumber",
       label: "Contact",
+      // Secondary: in the student's details, off the table until it is wide.
+      className: "hidden xl:table-cell",
       render: (r) => r.contactNumber || "—",
     },
     {
@@ -156,6 +165,7 @@ export default function StudentList({
     {
       key: "credentials",
       label: "Credentials",
+      className: "hidden xl:table-cell",
       render: (r) => (
         <span className="inline-flex items-center gap-1 text-gray-600">
           <FileText size={14} />

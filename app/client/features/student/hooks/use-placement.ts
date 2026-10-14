@@ -3,7 +3,6 @@ import {
   useGetPlacementDefaultsQuery,
   useCreatePlacementMutation,
   useGetAssignmentsQuery,
-  Student,
   Weekday,
 } from "@/lib/api/studentApi";
 import { useGetEstablishmentsQuery } from "@/lib/api/establishmentApi";
@@ -13,6 +12,25 @@ import { useSnackbar } from "@/lib/contexts/SnackbarContext";
 /** The BTVTED pattern the thesis describes as the common duty-day spread. */
 const DEFAULT_DUTY_DAYS: Weekday[] = ["WED", "THU", "FRI"];
 const DEFAULT_ACADEMIC_YEAR = "2025-2026";
+
+/**
+ * As much of a student as recording a placement needs. A full `Student` from
+ * the list satisfies it; so does the response to creating one, which is how
+ * "Record placement now" opens this straight after a student is added.
+ */
+export interface PlacementTarget {
+  id: string;
+  blockId?: string | null;
+  user: { name: string };
+}
+
+/** Today as an `<input type="date">` value, in the coordinator's own time zone. */
+function todayInputValue(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 export const DUTY_DAY_OPTIONS: Weekday[] = [
   "MON",
@@ -31,7 +49,10 @@ export const DUTY_DAY_OPTIONS: Weekday[] = [
  * starts the new one at zero — `activeAssignment` is surfaced so the dialog
  * can warn about that before it happens.
  */
-export function usePlacement(student: Student | null, onPlaced: () => void) {
+export function usePlacement(
+  student: PlacementTarget | null,
+  onPlaced: () => void,
+) {
   const [prevStudentId, setPrevStudentId] = useState<string | null>(null);
   const [establishmentId, setEstablishmentId] = useState("");
   const [prevEstablishmentId, setPrevEstablishmentId] = useState("");
@@ -61,9 +82,11 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     setPrevEstablishmentId("");
     setRequiredHoursOverride(null);
     setDutyDays(DEFAULT_DUTY_DAYS);
-    setStartDate("");
+    // Defaults the coordinator can change: starting today, in the student's
+    // own block.
+    setStartDate(studentId ? todayInputValue() : "");
     setAcademicYear(DEFAULT_ACADEMIC_YEAR);
-    setBlockId("");
+    setBlockId(student?.blockId ?? "");
     setConfirmed(false);
     setConfirmedFull(false);
     setServerSaysFull(false);
@@ -107,6 +130,15 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     { courseId: defaults?.courseId, yearLevel: defaults?.yearLevel },
     { skip: !defaults?.courseId },
   );
+
+  // A block is only sent, or shown as chosen, if it is one of the blocks for
+  // this course and year — the student's own block prefilled above may belong
+  // to a year level they have since left.
+  const selectedBlockId = (blockOptions ?? []).some((b) => b.id === blockId)
+    ? blockId
+    : "";
+  const blockIsStudentsOwn =
+    !!selectedBlockId && selectedBlockId === (student?.blockId ?? "");
 
   const requiredHours =
     requiredHoursOverride ??
@@ -160,7 +192,7 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
         startDate: new Date(startDate).toISOString(),
         academicYear,
         requiredHours: requiredHours ? Number(requiredHours) : undefined,
-        blockId: blockId || undefined,
+        blockId: selectedBlockId || undefined,
         confirmFull: isFull && confirmedFull ? true : undefined,
       }).unwrap();
       showSuccess(
@@ -201,7 +233,8 @@ export function usePlacement(student: Student | null, onPlaced: () => void) {
     setStartDate,
     academicYear,
     setAcademicYear,
-    blockId,
+    blockId: selectedBlockId,
+    blockIsStudentsOwn,
     setBlockId,
     blockOptions: blockOptions ?? [],
     activeAssignment,

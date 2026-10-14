@@ -43,15 +43,13 @@ export default function SupervisorAttendancePage() {
   ).length;
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50">
       <Sidebar
-        orgName="WPH Institute"
-        orgSubtitle="OJT Monitoring"
         items={SUPERVISOR_NAV}
         userName={currentUser?.name || "Supervisor"}
       />
 
-      <main className="flex-1 p-4 md:p-6">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
         <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6">
           <PageHeader
             title="Attendance Approval"

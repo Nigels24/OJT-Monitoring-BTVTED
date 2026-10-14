@@ -116,6 +116,7 @@ export default function RequirementsPanel({
         </button>
       </div>
 
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-100">
@@ -177,6 +178,7 @@ export default function RequirementsPanel({
           )}
         </tbody>
       </table>
+      </div>
       {sorted.length === 0 && !adding && (
         <p className="text-xs text-gray-400 italic py-2">
           No requirements yet — add one for each year level this program sends
@@ -226,7 +228,7 @@ function RowForm({
           value={row.yearLevel}
           onChange={(e) => setRow({ ...row, yearLevel: e.target.value })}
           placeholder="Year"
-          className="w-20 h-8 px-2 border border-gray-300 rounded-md text-sm"
+          className="w-20 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
         />
       </td>
       <td className="py-2 pr-2">
@@ -236,7 +238,7 @@ function RowForm({
           value={row.requiredHours}
           onChange={(e) => setRow({ ...row, requiredHours: e.target.value })}
           placeholder="Hours"
-          className="w-24 h-8 px-2 border border-gray-300 rounded-md text-sm"
+          className="w-24 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
         />
       </td>
       <td className="py-2 text-right">

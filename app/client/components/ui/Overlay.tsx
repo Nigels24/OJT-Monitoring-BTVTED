@@ -25,6 +25,10 @@ export const Z_LAYERS = {
   stickyHeader: 30,
   /** Select menus and any other anchored popover. */
   dropdown: 40,
+  /** The sidebar as a slide-in drawer below `lg`, and its backdrop. */
+  drawer: 44,
+  /** A popover anchored to something in the sidebar — it has to clear it. */
+  sidebarPopover: 46,
   dialog: 50,
   snackbar: 60,
 } as const;

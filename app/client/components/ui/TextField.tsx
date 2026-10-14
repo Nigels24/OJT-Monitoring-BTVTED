@@ -28,14 +28,20 @@ export default function TextField({
       </label>
       <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
         {FieldIcon && (
-          <span className="px-3 text-gray-400">
+          <span className="px-3 text-gray-400 shrink-0">
             <FieldIcon size={18} />
           </span>
         )}
         <input
           {...rest}
           type={isPassword ? (visible ? "text" : "password") : type}
-          className="flex-1 h-11 outline-none pr-3 text-gray-900 bg-transparent"
+          // Left padding only when no icon sits there already — without it
+          // the text of an icon-less field touched the border. `min-w-0` lets
+          // the input shrink inside a narrow grid cell instead of pushing
+          // out of it.
+          className={`flex-1 min-w-0 h-11 outline-none pr-3 text-gray-900 bg-transparent disabled:text-gray-500 ${
+            FieldIcon ? "" : "pl-3"
+          }`}
         />
         {isPassword && (
           <button

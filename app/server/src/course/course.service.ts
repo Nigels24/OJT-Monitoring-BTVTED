@@ -35,13 +35,6 @@ interface BlockFilter {
 // Not `as const`: Prisma's multi-field `orderBy` wants a mutable array, which
 // a `readonly [...]` tuple (what `as const` would produce here) is not
 // assignable to.
-const COURSE_INCLUDE = {
-  requirements: { orderBy: { yearLevel: 'asc' as const } },
-  blocks: {
-    orderBy: [{ academicYear: 'desc' as const }, { name: 'asc' as const }],
-  },
-};
-
 const BLOCK_INCLUDE = {
   course: { select: { id: true, code: true, name: true } },
   coordinator: {
@@ -49,6 +42,20 @@ const BLOCK_INCLUDE = {
   },
   _count: { select: { students: true, trainingAssignments: true } },
 } as const;
+
+// A course's nested blocks carry the same coordinator and counts as
+// `GET /blocks`: the course detail dialog renders its Blocks table from this
+// relation, so without them a saved coordinator reads as "Unassigned".
+const COURSE_INCLUDE = {
+  requirements: { orderBy: { yearLevel: 'asc' as const } },
+  blocks: {
+    include: {
+      coordinator: BLOCK_INCLUDE.coordinator,
+      _count: BLOCK_INCLUDE._count,
+    },
+    orderBy: [{ academicYear: 'desc' as const }, { name: 'asc' as const }],
+  },
+};
 
 @Injectable()
 export class CourseService {

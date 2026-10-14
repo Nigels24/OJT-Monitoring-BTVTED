@@ -128,6 +128,12 @@ export class SupervisorController {
     return this.supervisorService.getDashboard(req.user.userId);
   }
 
+  /** The supervisor's own establishment — the sidebar's title and address. */
+  @Get('establishment')
+  getEstablishment(@Req() req: AuthedRequest) {
+    return this.supervisorService.getEstablishment(req.user.userId);
+  }
+
   @Get('students')
   getStudents(@Req() req: AuthedRequest) {
     return this.supervisorService.getStudents(req.user.userId);

@@ -37,7 +37,7 @@ export default function RejectDialog({
       onClose={onCancel}
       closeOnBackdrop={false}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90dvh] overflow-y-auto flex flex-col">
         <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
           <div className="flex items-center gap-2">
             <XCircle size={20} className="text-red-600" />

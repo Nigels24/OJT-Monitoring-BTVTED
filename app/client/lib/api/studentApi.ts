@@ -283,9 +283,9 @@ export interface StudentDetailsRequest {
   /** Named apart from `yearLevel` above only because that name was already
    * taken by the deprecated free-text field (server: `resolveCourseFields`). */
   courseYearLevel?: number | null;
-  establishmentId?: string | null;
-  requiredHours?: number;
-  startDate?: string | null;
+  // No establishmentId, requiredHours or startDate: the server still accepts
+  // them (deprecated mirrors on Student), but they are set by recording a
+  // placement, never from the student form.
   status?: StudentStatus;
 }
 
@@ -309,6 +309,8 @@ export interface CreateStudentResponse {
   role: string;
   /** How emailing the login went. */
   credentialsEmail: CredentialsEmailResult;
+  /** The new student record — its id is what a placement is recorded against. */
+  studentProfile?: { id: string; blockId: string | null } | null;
   /**
    * Present only when `password` was omitted from the request **and** the
    * login email was not sent — the coordinator hands it over instead. Shown

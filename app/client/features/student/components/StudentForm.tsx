@@ -5,7 +5,6 @@ import {
   MapPin,
   IdCard,
   GraduationCap,
-  Clock,
   CalendarDays,
   KeyRound,
   Pencil,
@@ -15,7 +14,6 @@ import TextField from "@/components/ui/TextField";
 import Button from "@/components/ui/Button";
 import SelectField from "@/components/ui/SelectField";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
-import { Establishment } from "@/lib/api/establishmentApi";
 import { Block, Course } from "@/lib/api/courseApi";
 import { SCHOOL_NAME } from "@/lib/school";
 import type { StudentForm as StudentFormValues } from "../hooks/use-students";
@@ -29,7 +27,6 @@ interface StudentFormProps {
   isCreating: boolean;
   isUpdating: boolean;
   error: string;
-  establishments: Establishment[];
   courses: Course[];
   yearLevelOptions: number[];
   blocks: Block[];
@@ -64,7 +61,6 @@ export default function StudentForm({
   isCreating,
   isUpdating,
   error,
-  establishments,
   courses,
   yearLevelOptions,
   blocks,
@@ -285,8 +281,10 @@ export default function StudentForm({
             {/* This system serves one school — the name is permanent, not a
                 form field. Shown for reference, never editable. */}
             <div className="flex items-center gap-2 h-11 px-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-600">
-              <GraduationCap size={18} className="text-gray-400" />
-              {SCHOOL_NAME}
+              <GraduationCap size={18} className="shrink-0 text-gray-400" />
+              <span className="truncate" title={SCHOOL_NAME}>
+                {SCHOOL_NAME}
+              </span>
             </div>
           </div>
           <div>
@@ -353,42 +351,6 @@ export default function StudentForm({
           )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Establishment Assignment
-            </label>
-            <SelectField
-              value={form.establishmentId}
-              onChange={setValue("establishmentId")}
-              placeholder="Select Establishment"
-              options={[
-                { label: "Unassigned", value: "" },
-                ...establishments.map((e) => ({
-                  label: e.name,
-                  value: e.id,
-                })),
-              ]}
-              className="w-full"
-            />
-          </div>
-          <TextField
-            label="Required Hours"
-            labelIcon={Clock}
-            fieldIcon={Clock}
-            type="number"
-            min={0}
-            value={form.requiredHours}
-            onChange={setField("requiredHours")}
-            placeholder="500"
-          />
-          <TextField
-            label="OJT Start Date"
-            labelIcon={CalendarDays}
-            fieldIcon={CalendarDays}
-            type="date"
-            value={form.startDate}
-            onChange={setField("startDate")}
-          />
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
               Status
             </label>
             <SelectField
@@ -404,9 +366,8 @@ export default function StudentForm({
           </div>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          Course/year level here set the student&apos;s program — they don&apos;t
-          place the student anywhere. Use &quot;Record placement&quot; from the
-          student list to assign an establishment and start the OJT clock.
+          Placement, required hours and duty days are set with Record
+          placement after the student is saved.
         </p>
       </section>
 

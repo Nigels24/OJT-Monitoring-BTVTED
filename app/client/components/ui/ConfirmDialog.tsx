@@ -35,7 +35,7 @@ export default function ConfirmDialog({
   // choice, the same one Cancel holds focus for.
   return (
     <Overlay open={open} label={title} onClose={onCancel}>
-      <div className="bg-white rounded-2xl p-8 max-w-sm w-full max-h-[90vh] overflow-y-auto text-center">
+      <div className="bg-white rounded-2xl p-8 max-w-sm w-full max-h-[90dvh] overflow-y-auto text-center">
         <div className="flex justify-center mb-4">
           <div className="w-16 h-16 rounded-full border-2 border-sky-300 flex items-center justify-center">
             <Icon size={28} className="text-sky-400" />

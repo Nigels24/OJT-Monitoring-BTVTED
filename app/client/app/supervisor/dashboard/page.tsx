@@ -39,16 +39,14 @@ export default function SupervisorDashboardPage() {
   const displayName = data?.supervisor.name ?? "Supervisor";
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50">
       <Sidebar
-        orgName={data?.establishment?.name ?? "Establishment"}
-        orgSubtitle="OJT Monitoring"
         items={SUPERVISOR_NAV}
         userName={displayName}
         userSubtitle={data?.supervisor.position ?? undefined}
       />
 
-      <main className="flex-1 p-4 md:p-6">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
         <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6">
           <PageHeader
             title={`Welcome back, ${displayName}!`}

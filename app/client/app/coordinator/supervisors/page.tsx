@@ -46,16 +46,14 @@ export default function SupervisorManagementPage() {
   } = useSupervisorManagement();
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex flex-col lg:flex-row min-h-screen bg-gray-50">
       <Sidebar
-        orgName="WPH Institute"
-        orgSubtitle="Barangay San Francisco"
         items={COORDINATOR_NAV}
         userName={currentUser?.name || "Coordinator"}
       />
 
-      <main className="flex-1 p-4 md:p-6">
-        <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6 flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+      <main className="flex-1 min-w-0 p-4 md:p-6">
+        <div className="bg-gradient-to-r from-gray-800 to-gray-700 rounded-2xl p-4 md:p-6 mb-6 flex flex-wrap items-start justify-between gap-x-4">
           <PageHeader
             title="Supervisor Management"
             subtitle="Manage establishment supervisors and their credentials"

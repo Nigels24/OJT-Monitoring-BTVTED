@@ -57,9 +57,11 @@ export default function PrintPage({
         </div>
       </div>
 
-      <main className="mx-auto max-w-[210mm] p-4 print:max-w-none print:p-0">
+      {/* An A4 sheet is wider than a phone: it scrolls sideways inside this
+          frame on screen, and is untouched on paper. */}
+      <main className="mx-auto max-w-[210mm] p-4 overflow-x-auto print:overflow-visible print:max-w-none print:p-0">
         {framed ? (
-          <div className="bg-white shadow-sm p-[15mm] print:shadow-none print:p-0">
+          <div className="bg-white shadow-sm p-4 sm:p-[15mm] print:shadow-none print:p-0">
             {children}
           </div>
         ) : (

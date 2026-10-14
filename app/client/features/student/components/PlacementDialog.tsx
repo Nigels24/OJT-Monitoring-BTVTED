@@ -4,9 +4,12 @@ import Overlay from "@/components/ui/Overlay";
 import SelectField from "@/components/ui/SelectField";
 import TextField from "@/components/ui/TextField";
 import Button from "@/components/ui/Button";
-import { Student } from "@/lib/api/studentApi";
 import { slotsLabel } from "@/lib/format";
-import { DUTY_DAY_OPTIONS, usePlacement } from "../hooks/use-placement";
+import {
+  DUTY_DAY_OPTIONS,
+  usePlacement,
+  type PlacementTarget,
+} from "../hooks/use-placement";
 
 const DAY_LABEL: Record<string, string> = {
   MON: "Mon",
@@ -19,7 +22,7 @@ const DAY_LABEL: Record<string, string> = {
 };
 
 interface PlacementDialogProps {
-  student: Student | null;
+  student: PlacementTarget | null;
   onClose: () => void;
 }
 
@@ -43,6 +46,7 @@ export default function PlacementDialog({
     academicYear,
     setAcademicYear,
     blockId,
+    blockIsStudentsOwn,
     setBlockId,
     blockOptions,
     activeAssignment,
@@ -67,17 +71,18 @@ export default function PlacementDialog({
       onClose={onClose}
       closeOnBackdrop={false}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <MapPin size={20} className="text-green-600" />
-            <h2 className="text-lg md:text-xl font-semibold text-gray-900">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between gap-3 p-4 md:p-6 border-b border-gray-200 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <MapPin size={20} className="shrink-0 text-green-600" />
+            <h2 className="text-lg md:text-xl font-semibold text-gray-900 truncate">
               Record Placement — {student.user.name}
             </h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+            className="shrink-0 p-2 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700"
             aria-label="Close"
           >
             <X size={20} />
@@ -109,7 +114,12 @@ export default function PlacementDialog({
               onChange={setEstablishmentId}
               placeholder="Select Establishment"
               options={establishments.map((e) => ({
-                label: e.status === "INACTIVE" ? `${e.name} (Inactive)` : e.name,
+                label:
+                  e.status === "INACTIVE"
+                    ? `${e.name} (Inactive)`
+                    : hasNoFreeSlots(e)
+                      ? `${e.name} (Full)`
+                      : e.name,
                 value: e.id,
                 disabled: e.status === "INACTIVE",
               }))}
@@ -123,6 +133,39 @@ export default function PlacementDialog({
               >
                 {slotsLabel(slots.activeTrainees, slots.traineeSlots)}
               </p>
+            )}
+            {/* Directly under the choice that caused it. A full establishment
+                is a warning, not a block — but the server refuses the
+                placement (409) until it is confirmed, so the button below
+                stays off until this box is ticked. */}
+            {isFull && (
+              <div
+                role="alert"
+                className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 space-y-2"
+              >
+                <p className="flex gap-2">
+                  <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                  <span>
+                    <strong>This establishment has no free trainee slots</strong>
+                    {slots?.traineeSlots != null
+                      ? ` — ${slots.activeTrainees} of ${slots.traineeSlots} used`
+                      : ""}
+                    . The placement will not be recorded unless you confirm
+                    it below, or you can choose another establishment.
+                  </span>
+                </p>
+                <label className="flex items-start gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={confirmedFull}
+                    onChange={(e) => {
+                      setConfirmedFull(e.target.checked);
+                    }}
+                    className="mt-0.5"
+                  />
+                  Place this student here anyway, over the slot limit.
+                </label>
+              </div>
             )}
           </div>
 
@@ -207,6 +250,10 @@ export default function PlacementDialog({
               title='Must look like "2025-2026"'
             />
           </div>
+          <p className="text-xs text-gray-500 -mt-3">
+            The start date is filled in as today — change it if the placement
+            begins on another day.
+          </p>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -226,6 +273,11 @@ export default function PlacementDialog({
               ]}
               className="w-full"
             />
+            {blockIsStudentsOwn && (
+              <p className="text-xs text-gray-500 mt-1.5">
+                The student&apos;s own block.
+              </p>
+            )}
           </div>
 
           {activeAssignment && (
@@ -241,32 +293,6 @@ export default function PlacementDialog({
               I understand this transfers the current placement and starts
               new hours at 0.
             </label>
-          )}
-
-          {isFull && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 space-y-2">
-              <p className="flex gap-2">
-                <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-                <span>
-                  This establishment has no trainee slots left
-                  {slots?.traineeSlots != null
-                    ? ` — ${slots.activeTrainees} of ${slots.traineeSlots} used`
-                    : ""}
-                  . You can still record the placement.
-                </span>
-              </p>
-              <label className="flex items-start gap-2">
-                <input
-                  type="checkbox"
-                  checked={confirmedFull}
-                  onChange={(e) => {
-                    setConfirmedFull(e.target.checked);
-                  }}
-                  className="mt-0.5"
-                />
-                Place this student here anyway, over the slot limit.
-              </label>
-            </div>
           )}
 
           {error && (
@@ -297,5 +323,16 @@ export default function PlacementDialog({
         </form>
       </div>
     </Overlay>
+  );
+}
+
+/** A slot limit is set and already reached — `null` means no limit at all. */
+function hasNoFreeSlots(establishment: {
+  traineeSlots?: number | null;
+  activeTrainees?: number;
+}): boolean {
+  return (
+    establishment.traineeSlots != null &&
+    (establishment.activeTrainees ?? 0) >= establishment.traineeSlots
   );
 }
