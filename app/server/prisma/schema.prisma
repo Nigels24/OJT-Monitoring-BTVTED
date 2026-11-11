@@ -201,7 +201,8 @@ model Supervisor {
   establishment   Establishment @relation(fields: [establishmentId], references: [id])
   position        String?
 
-  attendanceApprovals Attendance[] @relation("ApprovedBy")
+  attendanceApprovals Attendance[]        @relation("ApprovedBy")
+  attendanceDeclines  AttendanceDecline[] @relation("AttendanceDeclinedBy")
   evaluations         Evaluation[]
   weeklyTasks         WeeklyTask[]
   concernsRaised      Concern[]
@@ -611,12 +612,61 @@ model Attendance {
   // waiting on a supervisor" — see common/attendance-overdue.ts.
   submittedAt DateTime @default(now())
 
+  // When the student last corrected this row while it was still PENDING, or
+  // null if never. A PENDING edit deliberately leaves `submittedAt` alone — the
+  // 21-day overdue clock must not restart because a student touched the row —
+  // so this column, not `submittedAt`, is what records that it changed. A
+  // DECLINED -> PENDING resubmission is a new review cycle instead: it resets
+  // `submittedAt` and sets this too.
+  lastEditedAt DateTime?
+
+  // Every decline this row has ever had, oldest first. `declineReason` above
+  // stays the latest one so existing screens keep working.
+  declines AttendanceDecline[]
+
   // One log per student per day. Without this a student can submit the same
   // day repeatedly and every hours total counts it more than once.
   // `date` is normalised to UTC midnight on write (see StudentService), which
   // is what makes the constraint meaningful.
   @@unique([studentId, date])
   @@index([trainingAssignmentId])
+}
+
+/// One supervisor decline of an attendance log, with the entry as it stood when
+/// it was declined. The paper requires the earlier decline reason to survive a
+/// resubmission, and `Attendance` is corrected in place (one row per student
+/// per day), so the trail lives here rather than on the row.
+///
+/// `onDelete: Cascade` on `attendance` is the third narrow exception to
+/// CLAUDE.md §6, with the same justification as JournalPhoto: a decline has no
+/// meaning without the log it is about, and is only ever removed with it
+/// (deleteStudentCascade deletes the student's attendance). `declinedBy` is
+/// NOT cascaded — deleteSupervisorCascade nulls it, like `approvedById`, and
+/// `declinedByName` keeps who it was.
+///
+/// The snapshot columns are copies, never re-derived: `hours` is
+/// common/attendance-hours.ts's figure at decline time, stored as a plain
+/// number (Float) because it is only ever displayed.
+model AttendanceDecline {
+  id           String     @id @default(cuid())
+  attendanceId String
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+
+  reason         String
+  declinedById   String?
+  declinedBy     Supervisor? @relation("AttendanceDeclinedBy", fields: [declinedById], references: [id])
+  declinedByName String?
+  declinedAt     DateTime    @default(now())
+
+  date      DateTime
+  timeInAM  DateTime?
+  timeOutAM DateTime?
+  timeInPM  DateTime?
+  timeOutPM DateTime?
+  hours     Float
+  remarks   String?
+
+  @@index([attendanceId])
 }
 
 /// One of the school's required documents (thesis Table 3), as data rather than a

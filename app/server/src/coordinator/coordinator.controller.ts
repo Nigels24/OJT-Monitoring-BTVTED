@@ -323,6 +323,12 @@ class CreatePlacementDto {
 }
 
 class UpdateAssignmentDto {
+  // Checked against the attendance and journal entries already logged for this
+  // placement, and its end date (CoordinatorService.assertStartDateFits).
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)

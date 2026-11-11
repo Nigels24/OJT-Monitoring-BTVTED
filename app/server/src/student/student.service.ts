@@ -19,6 +19,8 @@ import {
   ZERO_ASSIGNMENT_PROGRESS,
 } from '../common/assignment-progress';
 import { assertDutyDay } from '../common/duty-days';
+import { ATTENDANCE_DECLINES_SELECT } from '../common/attendance-declines';
+import type { Attendance, Prisma } from '../../generated/prisma/client';
 import {
   buildStorageName,
   MAX_UPLOAD_SIZE_BYTES,
@@ -34,6 +36,13 @@ import {
   EVALUATION_INCLUDE,
   withSectionTotals,
 } from '../supervisor/supervisor.service';
+
+/**
+ * What a submission did, so the client can say so (CLAUDE.md §10):
+ * CREATED a new log, UPDATED a still-PENDING one in place (same review cycle),
+ * or RESUBMITTED a DECLINED one for a new review.
+ */
+export type AttendanceSubmitOutcome = 'CREATED' | 'UPDATED' | 'RESUBMITTED';
 
 interface SubmitAttendanceInput {
   date: string;
@@ -84,7 +93,18 @@ const PROFILE_INCLUDE = {
   establishment: { select: { id: true, name: true } },
   enrolledCourse: { select: { id: true, code: true, name: true } },
   block: { select: { id: true, name: true } },
-} as const;
+  // The ACTIVE placement's own window and schedule — what the attendance
+  // form's date bounds and duty-day check mirror (submitAttendance). Not the
+  // deprecated Student.startDate copy, which a coordinator edit can move
+  // independently of the placement. Reshaped to `activePlacement` on the way
+  // out (withActivePlacement).
+  trainingAssignments: {
+    where: { status: 'ACTIVE' },
+    orderBy: { startDate: 'desc' },
+    take: 1,
+    select: { id: true, startDate: true, endDate: true, dutyDays: true },
+  },
+} as const satisfies Prisma.StudentInclude;
 
 @Injectable()
 export class StudentService {
@@ -144,7 +164,10 @@ export class StudentService {
         // unscoped. The hour/progress figures below are scoped to the ACTIVE
         // assignment only, per-assignment, the same as every other progress
         // figure in the app now is.
-        attendances: { orderBy: { date: 'desc' } },
+        attendances: {
+          orderBy: { date: 'desc' },
+          include: { declines: ATTENDANCE_DECLINES_SELECT },
+        },
         // Every placement, newest first: the ACTIVE one drives the hour
         // figures, and the newest one the completion checklist.
         trainingAssignments: {
@@ -400,53 +423,67 @@ export class StudentService {
       where: { studentId_date: { studentId: student.id, date } },
     });
     // APPROVED is the only status that blocks a resubmission — approved hours
-    // must never change after the fact. PENDING is allowed through as well as
-    // DECLINED: the supervisor hasn't acted on it yet, so a typo the student
-    // notices before review should still be fixable.
+    // must never change after the fact.
     if (existing && existing.status === 'APPROVED') {
       throw new ConflictException(
-        'This date has already been approved and cannot be resubmitted',
+        "This log is already approved and can't be changed.",
       );
     }
 
-    // A PENDING or DECLINED row is corrected in place rather than blocked —
-    // otherwise the student would permanently lose those hours with no way to
-    // fix the log.
-    const record = existing
-      ? await this.prisma.client.attendance.update({
-          where: { id: existing.id },
-          data: {
-            ...times,
-            remarks: data.remarks,
-            status: 'PENDING',
-            declineReason: null,
-            approvedById: null,
-            // A DECLINED row being corrected back to PENDING is re-pointed at
-            // whichever assignment is ACTIVE now, matching a fresh create —
-            // it may not be the one it was originally logged against if the
-            // student was reassigned in between.
-            trainingAssignmentId: activeAssignment.id,
-            // This *is* the (re)submission — reset the 21-day overdue clock
-            // (common/attendance-overdue.ts) so a corrected entry starts its
-            // wait over rather than inheriting however old the original row
-            // already was. `createdAt` stays untouched (Prisma only writes
-            // fields present here), which is deliberate — see submittedAt's
-            // schema comment.
-            submittedAt: new Date(),
-          },
-        })
-      : await this.prisma.client.attendance.create({
-          data: {
-            studentId: student.id,
-            date,
-            ...times,
-            remarks: data.remarks,
-            status: 'PENDING',
-            trainingAssignmentId: activeAssignment.id,
-          },
-        });
+    const now = new Date();
+    let outcome: AttendanceSubmitOutcome;
+    let record: Attendance;
+    if (!existing) {
+      outcome = 'CREATED';
+      record = await this.prisma.client.attendance.create({
+        data: {
+          studentId: student.id,
+          date,
+          ...times,
+          remarks: data.remarks,
+          status: 'PENDING',
+          trainingAssignmentId: activeAssignment.id,
+        },
+      });
+    } else if (existing.status === 'PENDING') {
+      // A correction before the supervisor has acted. Still the same review
+      // cycle: `submittedAt` is deliberately NOT touched, or a student could
+      // restart the 21-day overdue clock (common/attendance-overdue.ts) on an
+      // old entry just by re-saving it. `lastEditedAt` records the change.
+      outcome = 'UPDATED';
+      record = await this.prisma.client.attendance.update({
+        where: { id: existing.id },
+        data: {
+          ...times,
+          remarks: data.remarks,
+          // Re-pointed at the ACTIVE assignment, matching a fresh create — the
+          // student may have been reassigned since this row was written.
+          trainingAssignmentId: activeAssignment.id,
+          lastEditedAt: now,
+        },
+      });
+    } else {
+      // DECLINED -> PENDING: a new review cycle, so `submittedAt` is reset
+      // (the overdue clock and the approve/decline notification keys all
+      // version on it). `declineReason` is left in place — it is cleared only
+      // by an approval — and the AttendanceDecline trail is never touched
+      // here, so the earlier reason survives the resubmission.
+      outcome = 'RESUBMITTED';
+      record = await this.prisma.client.attendance.update({
+        where: { id: existing.id },
+        data: {
+          ...times,
+          remarks: data.remarks,
+          status: 'PENDING',
+          approvedById: null,
+          trainingAssignmentId: activeAssignment.id,
+          submittedAt: now,
+          lastEditedAt: now,
+        },
+      });
+    }
 
-    return withHours(record);
+    return { ...withHours(record), outcome };
   }
 
   async getAttendanceHistory(userId: string) {
@@ -455,6 +492,9 @@ export class StudentService {
     const attendances = await this.prisma.client.attendance.findMany({
       where: { studentId: student.id },
       orderBy: { date: 'desc' },
+      // The student's own decline trail, so a resubmitted log can still show
+      // why it was declined before (common/attendance-declines.ts).
+      include: { declines: ATTENDANCE_DECLINES_SELECT },
     });
 
     return attendances.map(withHours);
@@ -470,7 +510,7 @@ export class StudentService {
     }
     // `age` is derived from the date of birth here, read-only — it is not a
     // column and cannot be sent back.
-    return withAge(student);
+    return withAge(withActivePlacement(student));
   }
 
   async updateProfile(userId: string, data: UpdateProfileInput) {
@@ -494,7 +534,7 @@ export class StudentService {
       data,
       include: PROFILE_INCLUDE,
     });
-    return withAge(updated);
+    return withAge(withActivePlacement(updated));
   }
 
   /**
@@ -632,6 +672,25 @@ function credentialSurname(student: {
 }
 
 /** Adds the derived hours so the client never recomputes them. */
+/**
+ * Replaces the one-element `trainingAssignments` list PROFILE_INCLUDE loads
+ * with `activePlacement` (or null): the ACTIVE placement's start, end and duty
+ * days, as the attendance form needs them.
+ */
+function withActivePlacement<
+  T extends {
+    trainingAssignments: {
+      id: string;
+      startDate: Date;
+      endDate: Date | null;
+      dutyDays: string[];
+    }[];
+  },
+>(student: T) {
+  const { trainingAssignments, ...rest } = student;
+  return { ...rest, activePlacement: trainingAssignments[0] ?? null };
+}
+
 function withHours<T extends Parameters<typeof hoursForAttendance>[0]>(
   record: T,
 ) {

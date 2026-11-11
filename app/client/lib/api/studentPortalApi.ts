@@ -1,6 +1,10 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
 import { baseQueryWithAuth } from "./baseQuery";
 import type { Evaluation } from "./evaluationApi";
+import type {
+  AttendanceChangeFields,
+  AttendanceSubmitOutcome,
+} from "./attendanceDeclines";
 
 /**
  * The signed-in student's own view of their record (`/student/*`).
@@ -11,7 +15,7 @@ import type { Evaluation } from "./evaluationApi";
 
 export type AttendanceStatus = "PENDING" | "APPROVED" | "DECLINED";
 
-export interface AttendanceRecord {
+export interface AttendanceRecord extends AttendanceChangeFields {
   id: string;
   date: string;
   timeInAM: string | null;
@@ -20,7 +24,10 @@ export interface AttendanceRecord {
   timeOutPM: string | null;
   /** The student's own note. */
   remarks: string | null;
-  /** The supervisor's explanation when status is DECLINED. */
+  /**
+   * The latest decline reason. Kept after a resubmission (cleared only by an
+   * approval); the full trail is `declines`.
+   */
   declineReason: string | null;
   status: AttendanceStatus;
   createdAt: string;
@@ -122,6 +129,19 @@ export interface SubmitAttendanceRequest {
   remarks?: string;
 }
 
+export interface SubmitAttendanceResponse extends AttendanceRecord {
+  outcome: AttendanceSubmitOutcome;
+}
+
+/** The ACTIVE placement's window and schedule, as the attendance form needs them. */
+export interface ActivePlacement {
+  id: string;
+  startDate: string;
+  endDate: string | null;
+  /** "MON".."SUN". */
+  dutyDays: string[];
+}
+
 export interface StudentProfile {
   id: string;
   studentIdNumber: string;
@@ -150,11 +170,14 @@ export interface StudentProfile {
   /** DEPRECATED, read-only: the old free-text address, if one was entered. */
   legacyAddress: string | null;
   requiredHours: number;
+  /** DEPRECATED copy of the active placement's start; use `activePlacement`. */
   startDate: string | null;
   endDate: string | null;
   status: string;
   user: { id: string; email: string; name: string };
   establishment: { id: string; name: string } | null;
+  /** `null` when the student has no ACTIVE placement. */
+  activePlacement: ActivePlacement | null;
   enrolledCourse: { id: string; code: string; name: string } | null;
   block: { id: string; name: string } | null;
 }
@@ -297,7 +320,7 @@ export const studentPortalApi = createApi({
       providesTags: ["MyAttendance"],
     }),
     submitAttendance: builder.mutation<
-      AttendanceRecord,
+      SubmitAttendanceResponse,
       SubmitAttendanceRequest
     >({
       query: (body) => ({

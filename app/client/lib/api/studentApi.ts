@@ -127,6 +127,11 @@ export interface CreatePlacementRequest {
 }
 
 export interface UpdateAssignmentRequest {
+  /**
+   * `yyyy-mm-dd`. Refused if later than attendance or a journal entry already
+   * logged for the placement, or not before its end date.
+   */
+  startDate?: string;
   dutyDays?: Weekday[];
   /** `null` clears the end date; omit to leave it unchanged. */
   endDate?: string | null;

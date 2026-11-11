@@ -59,6 +59,14 @@ How the pieces fit together:
 Other devices only ever talk to the **website on port 3001**. The API and the
 database are never opened to the network.
 
+To use a different website port, set `WEB_PORT` when starting it — for
+example `set WEB_PORT=3002` then `npm run start:lan` in Command Prompt, or
+`WEB_PORT=3002 npm run start:lan` on macOS/Linux. `npm run health` and the PM2
+setup read the same `WEB_PORT`. Use that port everywhere this guide says 3001
+(firewall rule, `APP_PUBLIC_URL`, the addresses you open).
+`API_PORT` does the same for the API (default 3000): it moves both programs at
+once, without editing either `.env`, unless `API_INTERNAL_URL` is set too.
+
 ---
 
 ## 2. Install Node.js and PostgreSQL

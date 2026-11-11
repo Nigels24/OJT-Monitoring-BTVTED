@@ -90,6 +90,8 @@ export async function deleteStudentCascade(
     select: { storagePath: true },
   });
 
+  // AttendanceDecline rows go with their attendance via the schema's narrow
+  // onDelete: Cascade (its schema comment) — the one table this relies on.
   await tx.attendance.deleteMany({ where: { studentId } });
   await tx.document.deleteMany({ where: { studentId } });
   await tx.credential.deleteMany({ where: { studentId } });
@@ -181,7 +183,8 @@ export async function deleteStudentCascade(
  * Attendance they actioned is **kept** and merely loses its approver: a
  * student's approved hours are their own record and must survive their
  * supervisor leaving the establishment. `Attendance.approvedById` is nullable
- * precisely so this is possible.
+ * precisely so this is possible. The same goes for the decline trail
+ * (`AttendanceDecline.declinedById`).
  */
 export async function deleteSupervisorCascade(
   tx: Tx,
@@ -195,6 +198,11 @@ export async function deleteSupervisorCascade(
   await tx.attendance.updateMany({
     where: { approvedById: supervisorId },
     data: { approvedById: null },
+  });
+  // Their declines stay in the trail too; `declinedByName` keeps who it was.
+  await tx.attendanceDecline.updateMany({
+    where: { declinedById: supervisorId },
+    data: { declinedById: null },
   });
   await tx.weeklyTask.updateMany({
     where: { supervisorId },

@@ -9,6 +9,7 @@ import { NotificationService } from './notification.service';
 import {
   overdueAttendanceWhere,
   daysPending,
+  overdueDedupeKey,
 } from '../common/attendance-overdue';
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
@@ -107,12 +108,8 @@ export class OverdueSweepService implements OnModuleInit, OnModuleDestroy {
           row.student.establishmentId;
         const days = daysPending(row);
         const studentName = row.student.user.name;
-        // Keyed on submittedAt: re-running the sweep for the same still-open
-        // overdue row is a no-op (same key, same recipients), but a row that
-        // was resubmitted (new submittedAt) and later goes overdue again
-        // gets a fresh key and alerts again, rather than being silently
-        // swallowed by the first, now-stale alert's row.
-        const dedupeKey = `overdue:${row.id}:${row.submittedAt.toISOString()}`;
+        // One alert per review cycle — see overdueDedupeKey.
+        const dedupeKey = overdueDedupeKey(row);
 
         const blockCoordinatorRowId = blockId
           ? blockCoordinatorId.get(blockId)

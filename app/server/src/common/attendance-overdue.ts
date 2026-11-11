@@ -44,3 +44,23 @@ export function overdueAttendanceWhere(): Prisma.AttendanceWhereInput {
     submittedAt: { lt: new Date(Date.now() - OVERDUE_DAYS * MS_PER_DAY) },
   };
 }
+
+/**
+ * The overdue alert's notification key: one alert per *review cycle*, and a
+ * cycle is a `submittedAt`.
+ *
+ * - Re-running the sweep over a still-open overdue row is a no-op (same key).
+ * - A student correcting a PENDING row does not start a new cycle:
+ *   StudentService.submitAttendance leaves `submittedAt` alone and sets
+ *   `lastEditedAt` instead, so the key — and the clock — stay the same and no
+ *   second alert is raised for that entry.
+ * - A DECLINED row resubmitted is a new cycle on purpose: `submittedAt` is
+ *   reset, so if it goes overdue again it alerts again rather than being
+ *   swallowed by the first, now-stale alert.
+ */
+export function overdueDedupeKey(attendance: {
+  id: string;
+  submittedAt: Date;
+}): string {
+  return `overdue:${attendance.id}:${attendance.submittedAt.toISOString()}`;
+}

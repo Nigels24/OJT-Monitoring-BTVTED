@@ -56,8 +56,23 @@ export default function TrainingAssignmentsPanel({
   const { data: assignments, isLoading } = useGetAssignmentsQuery(studentId);
   const [updateAssignment] = useUpdateAssignmentMutation();
   const { showSuccess, showError } = useSnackbar();
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [endDateDraft, setEndDateDraft] = useState("");
+  // One date editor open at a time: the placement's start or its end date.
+  const [editing, setEditing] = useState<{
+    id: string;
+    field: "start" | "end";
+  } | null>(null);
+  const [dateDraft, setDateDraft] = useState("");
+  const [editError, setEditError] = useState("");
+
+  const openEditor = (id: string, field: "start" | "end", value: string) => {
+    setEditing({ id, field });
+    setDateDraft(value);
+    setEditError("");
+  };
+  const closeEditor = () => {
+    setEditing(null);
+    setEditError("");
+  };
 
   const handleStatusChange = async (
     id: string,
@@ -73,16 +88,29 @@ export default function TrainingAssignmentsPanel({
     }
   };
 
-  const handleSaveEndDate = async (id: string) => {
+  const handleSaveDate = async (id: string, field: "start" | "end") => {
+    if (field === "start" && !dateDraft) {
+      setEditError("Pick a start date.");
+      return;
+    }
     try {
-      await updateAssignment({
-        id,
-        endDate: endDateDraft ? new Date(endDateDraft).toISOString() : null,
-      }).unwrap();
-      showSuccess("End date updated.");
-      setEditingId(null);
+      await updateAssignment(
+        field === "start"
+          ? // A calendar day; the server normalises it to UTC midnight.
+            { id, startDate: dateDraft }
+          : {
+              id,
+              endDate: dateDraft ? new Date(dateDraft).toISOString() : null,
+            },
+      ).unwrap();
+      showSuccess(field === "start" ? "Start date updated." : "End date updated.");
+      closeEditor();
     } catch (err: unknown) {
-      showError(readError(err, "Failed to update assignment."));
+      // Shown beside the field too — e.g. "Attendance is already logged for
+      // 11/9/2026. The start date can't be later than that."
+      const message = readError(err, "Failed to update assignment.");
+      setEditError(message);
+      showError(message);
     }
   };
 
@@ -146,44 +174,67 @@ export default function TrainingAssignmentsPanel({
 
           {a.status === "ACTIVE" && (
             <div className="flex flex-wrap items-center gap-3 mt-3 pt-3 border-t border-gray-100">
-              {editingId === a.id ? (
+              {editing?.id === a.id ? (
+                <div className="flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs text-gray-600">
+                      {editing.field === "start" ? "Start date" : "End date"}
+                    </label>
+                    <input
+                      type="date"
+                      value={dateDraft}
+                      onChange={(e) => {
+                        setDateDraft(e.target.value);
+                        setEditError("");
+                      }}
+                      className="h-9 px-2 border border-gray-300 rounded-md text-sm text-gray-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveDate(a.id, editing.field)}
+                      className="text-xs font-medium text-blue-600 hover:underline"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeEditor}
+                      className="text-xs text-gray-500 hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {editError && (
+                    <p className="text-xs text-red-600" role="alert">
+                      {editError}
+                    </p>
+                  )}
+                </div>
+              ) : (
                 <>
-                  <input
-                    type="date"
-                    value={endDateDraft}
-                    onChange={(e) => {
-                      setEndDateDraft(e.target.value);
-                    }}
-                    className="h-9 px-2 border border-gray-300 rounded-md text-sm text-gray-700"
-                  />
                   <button
                     type="button"
-                    onClick={() => handleSaveEndDate(a.id)}
-                    className="text-xs font-medium text-blue-600 hover:underline"
+                    onClick={() =>
+                      openEditor(a.id, "start", a.startDate.slice(0, 10))
+                    }
+                    className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1"
                   >
-                    Save
+                    <Pencil size={12} /> Change start date
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditingId(null);
-                    }}
-                    className="text-xs text-gray-500 hover:underline"
+                    onClick={() =>
+                      openEditor(
+                        a.id,
+                        "end",
+                        a.endDate ? a.endDate.slice(0, 10) : "",
+                      )
+                    }
+                    className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1"
                   >
-                    Cancel
+                    <Pencil size={12} /> Set end date
                   </button>
                 </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingId(a.id);
-                    setEndDateDraft(a.endDate ? a.endDate.slice(0, 10) : "");
-                  }}
-                  className="text-xs font-medium text-blue-600 hover:underline flex items-center gap-1"
-                >
-                  <Pencil size={12} /> Set end date
-                </button>
               )}
               <button
                 type="button"

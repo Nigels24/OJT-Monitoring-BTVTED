@@ -20,6 +20,27 @@ export function formatDateOnly(
   return date.toLocaleDateString(undefined, { timeZone: "UTC" });
 }
 
+/**
+ * Renders a real instant (`lastEditedAt`, `declinedAt`, `createdAt`…) as
+ * "Nov 11, 2026, 2:40 PM" in the viewer's own local time — the opposite rule
+ * to `formatDateOnly` above.
+ */
+export function formatDateTime(
+  iso: string | null | undefined,
+  fallback = "\u2014",
+): string {
+  if (!iso) return fallback;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 /** The weekday of a date-only column, e.g. "Mon". Same UTC rule as above. */
 export function formatWeekdayOnly(
   iso: string | null | undefined,

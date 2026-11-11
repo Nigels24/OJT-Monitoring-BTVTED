@@ -3,6 +3,7 @@ import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import StatusBadge, { BadgeVariant } from "@/components/ui/StatusBadge";
 import { AttendanceRecord, AttendanceStatus } from "@/lib/api/studentPortalApi";
 import { formatDateOnly, formatWeekdayOnly } from "@/lib/format";
+import AttendanceChangeNote from "@/components/ui/AttendanceChangeNote";
 
 interface AttendanceTableProps {
   rows: AttendanceRecord[];
@@ -98,12 +99,9 @@ export default function AttendanceTable({
       render: (r) => (
         <div className="max-w-xs">
           <span className="text-gray-600">{r.remarks || "—"}</span>
-          {/* A declined log is only actionable if the student can see why. */}
-          {r.status === "DECLINED" && r.declineReason && (
-            <p className="text-xs text-red-600 mt-1">
-              <span className="font-medium">Declined:</span> {r.declineReason}
-            </p>
-          )}
+          {/* A declined log is only actionable if the student can see why,
+              and a resubmitted one still shows why it was declined before. */}
+          <AttendanceChangeNote {...r} />
         </div>
       ),
     },

@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma, Weekday } from '../../generated/prisma/client';
 import { totalHours } from '../common/attendance-hours';
+import { ATTENDANCE_DECLINES_SELECT } from '../common/attendance-declines';
 import {
   MS_PER_DAY,
   manilaToday,
@@ -1178,6 +1179,9 @@ export class CoordinatorService {
         trainingAssignment: {
           select: { establishment: { select: { id: true, name: true } } },
         },
+        // Read-only, as on the supervisor's queue: what changed since a
+        // decline (common/attendance-declines.ts).
+        declines: ATTENDANCE_DECLINES_SELECT,
       },
       orderBy: { submittedAt: 'asc' },
     });
@@ -1220,6 +1224,8 @@ export class CoordinatorService {
             : [],
           date: row.date,
           daysPending: daysPending(row),
+          lastEditedAt: row.lastEditedAt,
+          declines: row.declines,
           link: '/coordinator/attendance',
         };
       }),
@@ -1930,13 +1936,18 @@ export class CoordinatorService {
   }
 
   /**
-   * Edits an assignment in place: duty days, an early end date, or closing it
-   * out (COMPLETED/CANCELLED). Never TRANSFERRED here — that status only ever
-   * comes from `createPlacement` recording the next placement.
+   * Edits an assignment in place: its start date, duty days, an early end
+   * date, or closing it out (COMPLETED/CANCELLED). Never TRANSFERRED here —
+   * that status only ever comes from `createPlacement` recording the next
+   * placement.
+   *
+   * Any coordinator may edit any placement — "My Block" is a view default, not
+   * an authorization boundary (CLAUDE.md §2), as with grading (§13).
    */
   async updateAssignment(
     assignmentId: string,
     data: {
+      startDate?: string;
       dutyDays?: Weekday[];
       endDate?: string | null;
       status?: 'COMPLETED' | 'CANCELLED';
@@ -1949,15 +1960,98 @@ export class CoordinatorService {
       throw new NotFoundException('Training assignment not found');
     }
 
-    return this.prisma.client.trainingAssignment.update({
-      where: { id: assignmentId },
-      data: {
-        dutyDays: data.dutyDays,
-        endDate: toNullableDate(data.endDate),
-        status: data.status,
-      },
-      include: { establishment: { select: { id: true, name: true } } },
+    let startDate: Date | undefined;
+    if (data.startDate !== undefined) {
+      startDate = startOfUtcDay(data.startDate);
+      if (Number.isNaN(startDate.getTime())) {
+        throw new BadRequestException('startDate is not a valid date');
+      }
+    }
+    const endDate = toNullableDate(data.endDate);
+
+    if (startDate) {
+      const [earliestAttendance, earliestJournal] = await Promise.all([
+        this.prisma.client.attendance.findFirst({
+          where: { trainingAssignmentId: assignmentId },
+          orderBy: { date: 'asc' },
+          select: { date: true },
+        }),
+        this.prisma.client.journalEntry.findFirst({
+          where: { trainingAssignmentId: assignmentId },
+          orderBy: { entryDate: 'asc' },
+          select: { entryDate: true },
+        }),
+      ]);
+      assertStartDateFits(startDate, {
+        // The end date as it will stand after this update.
+        endDate: endDate === undefined ? assignment.endDate : endDate,
+        earliestAttendance: earliestAttendance?.date ?? null,
+        earliestJournal: earliestJournal?.entryDate ?? null,
+      });
+    }
+
+    return this.prisma.client.$transaction(async (tx) => {
+      const updated = await tx.trainingAssignment.update({
+        where: { id: assignmentId },
+        data: {
+          startDate,
+          dutyDays: data.dutyDays,
+          endDate,
+          status: data.status,
+        },
+        include: { establishment: { select: { id: true, name: true } } },
+      });
+      // The deprecated Student.startDate copy (CLAUDE.md §10) is still read by
+      // the dashboard's attendance-rate window, the student view and profile,
+      // and the evaluation header — so it follows the placement it mirrors,
+      // which is the ACTIVE one. A past placement's start never moves it.
+      if (startDate && assignment.status === 'ACTIVE') {
+        await tx.student.update({
+          where: { id: assignment.studentId },
+          data: { startDate },
+        });
+      }
+      return updated;
     });
+  }
+}
+
+/**
+ * Where a placement's start date may move to (PATCH /coordinator/assignments
+ * /:id). Attendance and journal entries are only ever accepted on or after the
+ * start (StudentService.submitAttendance, journal duty-day rules), so a start
+ * later than the earliest one already logged would leave it outside its own
+ * placement. `endDate` is exclusive, as everywhere else, so the start must be
+ * strictly before it or no day could be logged at all.
+ */
+export function assertStartDateFits(
+  startDate: Date,
+  bounds: {
+    endDate: Date | null;
+    earliestAttendance: Date | null;
+    earliestJournal: Date | null;
+  },
+): void {
+  if (bounds.endDate && startDate.getTime() >= bounds.endDate.getTime()) {
+    throw new BadRequestException(
+      `The start date must be before the placement's end date (${formatDateOnly(bounds.endDate)}).`,
+    );
+  }
+  if (
+    bounds.earliestAttendance &&
+    startDate.getTime() > bounds.earliestAttendance.getTime()
+  ) {
+    throw new BadRequestException(
+      `Attendance is already logged for ${formatDateOnly(bounds.earliestAttendance)}. The start date can't be later than that.`,
+    );
+  }
+  if (
+    bounds.earliestJournal &&
+    startDate.getTime() > bounds.earliestJournal.getTime()
+  ) {
+    throw new BadRequestException(
+      `A journal entry already exists for ${formatDateOnly(bounds.earliestJournal)}. The start date can't be later than that.`,
+    );
   }
 }
 

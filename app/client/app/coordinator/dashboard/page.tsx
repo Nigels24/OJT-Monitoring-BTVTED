@@ -40,6 +40,7 @@ import { useGetJournalsAwaitingCountQuery } from "@/lib/api/journalApi";
 import { useGetOpenConcernCountQuery } from "@/lib/api/concernApi";
 import { formatDateOnly } from "@/lib/format";
 import SectionError from "@/components/ui/SectionError";
+import AttendanceChangeNote from "@/components/ui/AttendanceChangeNote";
 
 // Charting the statuses that actually exist. The prototype showed
 // present/late/absent; attendance has no such states.
@@ -132,7 +133,19 @@ const OVERDUE_COLUMNS: DataTableColumn<OverdueVerificationRow>[] = [
   {
     key: "date",
     label: "Date",
-    render: (r) => formatDateOnly(r.date),
+    // Overdue rows are always PENDING; the note shows an earlier decline and
+    // the last edit, read-only.
+    render: (r) => (
+      <div>
+        {formatDateOnly(r.date)}
+        <AttendanceChangeNote
+          status="PENDING"
+          declineReason={null}
+          lastEditedAt={r.lastEditedAt}
+          declines={r.declines}
+        />
+      </div>
+    ),
   },
   {
     key: "daysPending",

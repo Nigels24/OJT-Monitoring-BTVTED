@@ -1,5 +1,6 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
 import { baseQueryWithAuth } from "./baseQuery";
+import type { AttendanceChangeFields } from "./attendanceDeclines";
 
 /**
  * Coordinator dashboard aggregates.
@@ -40,7 +41,7 @@ export interface RecentStudent {
   status: string;
 }
 
-export interface OverdueVerificationRow {
+export interface OverdueVerificationRow extends AttendanceChangeFields {
   id: string;
   studentName: string;
   establishmentName: string | null;

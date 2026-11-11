@@ -21,7 +21,8 @@ npm run start:dev                    # watch mode, http://localhost:3000
 npm run build && npm run start:prod
 npm run lint                         # eslint, check only
 npm run lint:fix                     # eslint --fix
-npm test                             # jest, rootDir src, *.spec.ts — twenty-two spec files so far, all pure rules or a service over a stubbed Prisma/transport (--passWithNoTests)
+npm run format                       # prettier --write src/ and test/
+npm test                             # jest, rootDir src, *.spec.ts — all pure rules or a service over a stubbed Prisma/transport, no DB needed (--passWithNoTests); test:watch / test:cov also exist
 npx jest path/to/file.spec.ts        # single unit test file (or: npx jest -t "<test name>")
 npm run test:e2e                     # test/app.e2e-spec.ts — boots the real AppModule, so it needs .env and a reachable DB
 npm run seed                         # idempotent; see below
@@ -31,6 +32,8 @@ npm run backup                       # pg_dump + copy of STORAGE_DIR into BACKUP
 npm run restore [-- <backup name>]   # lists backups / restores one after a typed confirmation
 
 npx prisma migrate dev --name <desc> # create + apply a migration
+npm run db:deploy                    # prisma generate && prisma migrate deploy (production/host machine)
+npm run start:lan                    # node dist/src/main — the build output is dist/src/, not dist/
 npx prisma generate                  # REQUIRED after clone/schema change — see below
 
 # client (app/client)
@@ -41,6 +44,8 @@ npm run start:lan                    # next start -H 0.0.0.0 -p 3001
 
 # repo root — shortcuts only, no dependencies (docs/DEPLOYMENT.md)
 npm run setup | db:deploy | seed | build:all | start:lan | health | backup | restore
+# WEB_PORT=<n> overrides the website's 3001 for start:lan, health and ecosystem.config.cjs (scripts/ports.cjs)
+# API_PORT=<n> overrides the API's 3000 there too: injected as the API's PORT and the website's API_INTERNAL_URL (env beats .env; an explicit API_INTERNAL_URL wins)
 ```
 
 The client has **no test setup** (no test runner in `devDependencies`, no test files) and no README.
@@ -56,7 +61,7 @@ The client has **no test setup** (no test runner in `devDependencies`, no test f
 
 ### 1. Modules actually wired
 
-`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) is in `AppModule` and imports `CoordinatorModule`, which exports `CoordinatorService` for it. `ReportModule` (§19) is in `AppModule` and is read-only. `FilesModule` (§20) holds the two routes that take no login: `GET /files/:token` and `GET /health`.
+`app.module.ts` imports: `AuthModule`, `PrismaModule`, `CoordinatorModule`, `EstablishmentModule`, `StudentModule`, `SupervisorModule`, `MessagesModule`, `EvaluationTemplateModule`, `CourseModule`, `NotificationModule`, `JournalModule`, `DocumentModule`, `WeeklyTaskModule`, `ConcernModule`, `AnnouncementModule`, `StudentImportModule`, `ReportModule`, `FilesModule`. `MailModule` is imported by `CoordinatorModule` rather than `AppModule` (§16). `StudentImportModule` (§17) imports `CoordinatorModule`, which exports `CoordinatorService` for it. `ReportModule` (§19) is read-only. `FilesModule` (§20) holds the two routes that take no login: `GET /files/:token` and `GET /health`.
 
 - There is no standalone `attendance` or `evaluation` module — that logic lives in the `student`/`supervisor`/`coordinator` controllers and services. Placements (`TrainingAssignment`, §10) live in `CoordinatorService`. Credentials live in `StudentService`.
 - `JournalModule` and `DocumentModule` have **one service and one controller per role** (`student-*.controller.ts`, `coordinator-*.controller.ts`, `supervisor-journal.controller.ts`), each mounted under that role's URL prefix (`/student/journals`, `/coordinator/documents`, …). `CourseModule` exposes `/courses`, `/blocks`, `/course-requirements`.
@@ -117,7 +122,7 @@ Convention: a missing/inapplicable stat reads `null`/absent, not a fake `0`.
 
 Deleting a person is rare, irreversible, and touches many tables, so the order is spelled out explicitly in `src/common/cascade-delete.ts` and run inside `prisma.$transaction` with `CASCADE_TRANSACTION_OPTIONS` (`maxWait: 10s`, `timeout: 30s`). Queries inside it are **sequential, never `Promise.all`** — an interactive transaction is one connection, and racing reads on it silently returned empty results.
 
-The schema has no `onDelete: Cascade` except two documented, narrow exceptions for rows with no independent meaning: `Notification.user` and `JournalPhoto.journalEntry`. (`Evaluation.template` is `onDelete: Restrict` — a template with evaluations is never deleted.) Don't add a third without the same justification in the schema comment.
+The schema has no `onDelete: Cascade` except three documented, narrow exceptions for rows with no independent meaning: `Notification.user`, `JournalPhoto.journalEntry` and `AttendanceDecline.attendance` (§10). (`Evaluation.template` is `onDelete: Restrict` — a template with evaluations is never deleted.) Don't add a third without the same justification in the schema comment.
 
 - `deleteStudentCascade` removes attendance, documents, credentials, evaluation scores/evaluations, journal entries, training assignments, messaging footprint, then the `Student` and `User` rows. It **returns the storage paths** (documents, credentials, journal photos) so the caller deletes the files *after* the commit — storage isn't transactional.
 - `deleteSupervisorCascade` removes their evaluations and messaging footprint, **nulls** `approvedById` on attendance they approved (approved hours survive the supervisor leaving), then deletes `Supervisor`/`User`.
@@ -155,7 +160,8 @@ An `Evaluation` keeps its own `templateId` forever, and scores are `EvaluationSc
 - `Student.course`, `establishmentId`, `requiredHours`, `startDate`, `endDate`, `yearLevel` are **deprecated mirrors**, written at placement time and not kept in sync afterwards. Read the ACTIVE assignment for anything new; `Student.courseId`/`blockId`/`courseYearLevel` are the structured, current fields (`resolveCourseFields` keeps the legacy `yearLevel` string in sync).
 - Progress (`src/common/assignment-progress.ts`) is computed from **that assignment's own** APPROVED/PENDING attendance, using `totalHours` from `attendance-hours.ts` — never reimplement the hours math.
 - **Duty days** (`src/common/duty-days.ts`): a date outside the assignment's `dutyDays` cannot be logged or journalled at all. Attendance and journals share `assertDutyDay` so they give the same answer and wording. Attendance also requires an ACTIVE assignment and a date within its window and not in the future; completion is by hours, so `Student.status === 'COMPLETED'` — not `endDate` passing — is what closes logging.
-- `Attendance` is unique per `[studentId, date]`. A DECLINED row is corrected **in place**, which resets `submittedAt` (not `createdAt`).
+- `Attendance` is unique per `[studentId, date]`, and a same-date submit never adds a row. `submitAttendance` answers with `outcome`: `CREATED`; `UPDATED` (a PENDING correction — `submittedAt` is **kept**, so the overdue clock and its alert key don't restart, and `lastEditedAt` is set); `RESUBMITTED` (DECLINED → PENDING, a new review cycle — `submittedAt` is reset, not `createdAt`). APPROVED is a 409.
+- **Decline trail.** Each supervisor decline writes an `AttendanceDecline` row (reason, who, when, and a snapshot of the entry) in the same transaction as the status change (`common/attendance-declines.ts`; a repeat of the same reason in the same cycle is a no-op). `Attendance.declineReason` stays the latest reason and is cleared only by an approval. A placement's `startDate` may be edited (`PATCH /coordinator/assignments/:id`) but never past its earliest attendance or journal entry, and the ACTIVE one carries the `Student.startDate` copy with it.
 
 ### 11. Notifications and the overdue sweep
 
@@ -298,7 +304,7 @@ Running it: root `package.json` holds shortcut scripts only (no dependencies, no
 
 Structure convention:
 
-- `app/<role>/<page>/page.tsx` — thin, `"use client"`, composes `Sidebar` + feature components. Each role's nav array lives in one file (`features/coordinator/nav.ts`, `features/student-portal/nav.ts`, `features/supervisor/nav.ts`) — add a new page's entry there. `Sidebar` also hosts the notification bell and the change-password dialog.
+- `app/<role>/<page>/page.tsx` — thin, `"use client"`, composes `Sidebar` + feature components. Each role's nav array lives in one file (`features/coordinator/nav.ts`, `features/student-portal/nav.ts`, `features/supervisor/nav.ts`) — add a new page's entry there. `Sidebar` also hosts the notification bell and the change-password dialog, decides its own org heading from the signed-in role (school for coordinator/student, the establishment for a supervisor — pages don't pass one), and becomes a slide-in drawer below `lg`; pages use the `flex flex-col lg:flex-row` shell with `<main className="flex-1 min-w-0 …">`. Stacking order for sidebar, drawer, dropdowns and dialogs is the one `Z_LAYERS` table in `components/ui/Overlay.tsx` — use it rather than ad-hoc `z-*` classes.
 - `features/<domain>/hooks/use-<domain>.ts` — all state, RTK Query calls, filtering, pagination, and handlers for a domain, returned as one large object. `features/<domain>/components/` are presentational and receive that object's fields as props.
 - `components/ui/` — generic primitives; `lib/api/*Api.ts` — one RTK Query `createApi` slice per domain. **A new slice must be added to both the `reducer` map and the `middleware` concat in `lib/store.ts`.**
 - `@/*` maps to the client root. There is no shared per-role layout; app-wide concerns go in `lib/providers.tsx`.

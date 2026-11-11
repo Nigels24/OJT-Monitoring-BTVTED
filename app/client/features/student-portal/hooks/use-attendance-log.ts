@@ -6,7 +6,16 @@ import {
   AttendanceRecord,
   AttendanceStatus,
 } from "@/lib/api/studentPortalApi";
+import type { AttendanceSubmitOutcome } from "@/lib/api/attendanceDeclines";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import { dutyDayError } from "@/lib/duty-days";
+
+/** The toast for each thing a submission can have done (server: outcome). */
+const OUTCOME_MESSAGE: Record<AttendanceSubmitOutcome, string> = {
+  CREATED: "Attendance submitted and sent for approval",
+  UPDATED: "Attendance updated",
+  RESUBMITTED: "Resubmitted for approval",
+};
 
 const EMPTY_FORM = {
   date: "",
@@ -45,19 +54,26 @@ function spanHours(from: string, to: string): number {
 }
 
 /**
- * Today as `yyyy-mm-dd` in the browser's own local time zone (not UTC).
- *
- * `new Date().toISOString().slice(0, 10)` looks equivalent but isn't: it
- * converts to UTC first, so a student in Asia/Manila (UTC+8) submitting in
- * the early morning would see yesterday's date as the bound. Reading the
- * local getters avoids that conversion entirely.
+ * Today as `yyyy-mm-dd` on Manila's calendar — the server's `manilaToday()`,
+ * which is what it checks a future date against. Not the browser's own zone
+ * (a device set to another zone would otherwise disagree by a day), and never
+ * `toISOString()`, which is UTC and shows yesterday before 08:00 Manila.
+ * en-CA formats as yyyy-mm-dd.
  */
-function todayLocalDateString(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function manilaTodayDateString(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/** The calendar day before a `yyyy-mm-dd` value. */
+function dayBefore(dateOnly: string): string {
+  const d = new Date(`${dateOnly}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** `yyyy-mm-dd` -> "Dec 1, 2026", parsed as UTC so no local shift applies. */
@@ -103,38 +119,33 @@ export function useAttendanceLog() {
   const [submitAttendance, { isLoading: isSubmitting }] =
     useSubmitAttendanceMutation();
 
-  // Mirrors the server's OJT-period rules (student.service.ts
-  // submitAttendance) — this is UX only, so a student sees why before they
-  // submit rather than after; the server re-validates regardless of what's
-  // sent here.
+  // Mirrors the server's rules (student.service.ts submitAttendance) — UX
+  // only, so a student sees why before they submit rather than after; the
+  // server re-validates regardless of what's sent here.
   //
-  // Completion is by hours, not the calendar, so a scheduled endDate never
-  // blocks logging — only status COMPLETED does. That leaves five states:
-  //   1. NOT STARTED  — today < startDate: form disabled, no min/max shown.
-  //   2. ACTIVE        — form enabled, min=startDate, max=today.
-  //   3. PAST SCHEDULED END, not complete — form stays enabled with a
-  //      non-blocking notice; bounds are the same as ACTIVE.
+  // The window is the ACTIVE placement's own (`activePlacement`), never the
+  // deprecated Student.startDate copy: from its start date up to today in
+  // Manila, and before its end date when one is set (the end is exclusive,
+  // as on the server). Completion is by hours, so only status COMPLETED
+  // closes logging. States:
+  //   1. NOT STARTED  — today < start: form disabled.
+  //   2. ACTIVE        — form enabled, min = start, max = today.
+  //   3. ENDED EARLY   — an end date has passed: max = the day before it.
   //   4. COMPLETED     — form disabled.
-  //   5. UNASSIGNED    — no establishment: form disabled. Nothing a student
-  //      logs here could ever be approved, because the supervisor's queue is
-  //      scoped to an establishment.
-  const today = todayLocalDateString();
-  const startDate = profile?.startDate
-    ? profile.startDate.slice(0, 10)
-    : undefined;
-  const endDate = profile?.endDate ? profile.endDate.slice(0, 10) : undefined;
+  //   5. UNASSIGNED    — no establishment or no ACTIVE placement: disabled.
+  //      Nothing logged here could ever be approved.
+  const today = manilaTodayDateString();
+  const placement = profile?.activePlacement ?? null;
+  const startDate = placement ? placement.startDate.slice(0, 10) : undefined;
+  const endDate = placement?.endDate ? placement.endDate.slice(0, 10) : undefined;
+  const dutyDays = placement?.dutyDays;
 
   const isCompleted = profile?.status === "COMPLETED";
   // `profile &&` so this doesn't flash "unassigned" while the profile loads.
-  const isUnassigned = !!profile && !profile.establishment;
+  const isUnassigned = !!profile && (!profile.establishment || !placement);
   const isNotStarted =
     !isCompleted && !isUnassigned && !!startDate && today < startDate;
-  const isPastScheduledEnd =
-    !isCompleted &&
-    !isUnassigned &&
-    !isNotStarted &&
-    !!endDate &&
-    today > endDate;
+  const hasEnded = !isCompleted && !isUnassigned && !!endDate && today >= endDate;
 
   let minDate: string | undefined;
   let maxDate: string | undefined;
@@ -142,18 +153,19 @@ export function useAttendanceLog() {
   let disabledMessage: string | undefined = isCompleted
     ? "Your OJT is complete."
     : isUnassigned
-      ? "You are not assigned to an establishment yet. Contact your coordinator."
+      ? profile?.establishment
+        ? "You have no active training placement. Contact your coordinator."
+        : "You are not assigned to an establishment yet. Contact your coordinator."
       : isNotStarted
-        ? `Your OJT starts on ${formatDateLabel(startDate!)}. You'll be able to log attendance from then.`
+        ? `Your placement starts on ${formatDateLabel(startDate!)}. You'll be able to log attendance from then.`
         : undefined;
 
   if (!isDisabled) {
     minDate = startDate;
-    maxDate = today;
-    // Safety net: bounds should never invert once NOT_STARTED is excluded
-    // above, but if they somehow do, disable rather than hand the native
-    // date input an impossible min/max pair (Chrome rejects the field
-    // outright with its own unstyled message in that case).
+    maxDate = hasEnded ? dayBefore(endDate!) : today;
+    // Bounds can still invert (an end date on or before the start). Disable
+    // rather than hand the native date input an impossible min/max pair —
+    // Chrome rejects the field outright with its own unstyled message.
     if (minDate && minDate > maxDate) {
       minDate = undefined;
       maxDate = undefined;
@@ -163,8 +175,8 @@ export function useAttendanceLog() {
   }
 
   const noticeMessage =
-    !isDisabled && isPastScheduledEnd
-      ? `Your scheduled OJT ended on ${formatDateLabel(endDate!)}. Keep logging until your required hours are met.`
+    !isDisabled && hasEnded
+      ? `Your placement ended on ${formatDateLabel(endDate!)}. You can still log days before then.`
       : undefined;
 
   const setField =
@@ -218,19 +230,26 @@ export function useAttendanceLog() {
       return;
     }
 
-    // Mirrors the server's checks (student.service.ts submitAttendance) —
-    // never a combined "between X and Y" range, since startDate and today
-    // can legitimately be inconsistent with each other (e.g. an OJT period
-    // that hasn't started yet). endDate is not checked here — a scheduled
-    // end never blocks logging, only status COMPLETED does (handled above).
+    // Same checks, order and wording as the server (submitAttendance).
     if (startDate && form.date < startDate) {
       setError(
-        `Your OJT period starts on ${formatDateLabel(startDate)}. You cannot log attendance before then.`,
+        `Your current placement starts on ${formatDateLabel(startDate)}. You cannot log attendance before then.`,
+      );
+      return;
+    }
+    if (endDate && form.date >= endDate) {
+      setError(
+        `Your current placement ended on ${formatDateLabel(endDate)}. You cannot log attendance on or after then.`,
       );
       return;
     }
     if (form.date > today) {
       setError("Attendance cannot be logged for a future date.");
+      return;
+    }
+    const notDutyDay = dutyDays ? dutyDayError(form.date, dutyDays) : "";
+    if (notDutyDay) {
+      setError(notDutyDay);
       return;
     }
 
@@ -248,7 +267,7 @@ export function useAttendanceLog() {
     }
 
     try {
-      await submitAttendance({
+      const saved = await submitAttendance({
         date: form.date,
         timeInAM: toIsoInstant(form.date, form.timeInAM),
         timeOutAM: toIsoInstant(form.date, form.timeOutAM),
@@ -259,11 +278,9 @@ export function useAttendanceLog() {
 
       setForm(EMPTY_FORM);
       setCorrectionTarget(null);
-      showSuccess(
-        isCorrecting
-          ? "Log corrected and resubmitted — awaiting approval again."
-          : "Attendance submitted and sent for approval.",
-      );
+      // The server says what it did — a same-date submit from the plain form
+      // is an update too, not only one started from "Correct this log".
+      showSuccess(OUTCOME_MESSAGE[saved.outcome] ?? OUTCOME_MESSAGE.CREATED);
     } catch (err: unknown) {
       const message = readError(
         err,

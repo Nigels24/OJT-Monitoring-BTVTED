@@ -1,10 +1,11 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
 import { baseQueryWithAuth } from "./baseQuery";
 import type { AttendanceStatus } from "./studentPortalApi";
+import type { AttendanceChangeFields } from "./attendanceDeclines";
 
 /** The signed-in supervisor's view of their establishment (`/supervisor/*`). */
 
-export interface SupervisorAttendance {
+export interface SupervisorAttendance extends AttendanceChangeFields {
   id: string;
   date: string;
   timeInAM: string | null;

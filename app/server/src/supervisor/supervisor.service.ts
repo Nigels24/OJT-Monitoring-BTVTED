@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -27,8 +28,17 @@ import { EvaluationTemplateService } from '../evaluation-template/evaluation-tem
 import { NotificationService } from '../notification/notification.service';
 import { formatDateOnly } from '../common/dates';
 import { isOverdue, daysPending } from '../common/attendance-overdue';
+import {
+  ATTENDANCE_DECLINES_SELECT,
+  declineSnapshot,
+  isNewDecline,
+} from '../common/attendance-declines';
 
 type AttendanceStatus = 'PENDING' | 'APPROVED' | 'DECLINED';
+
+/** 409 for declining a log whose hours are already approved. */
+const APPROVED_DECLINE_MESSAGE =
+  "This log is already approved and can't be declined.";
 
 @Injectable()
 export class SupervisorService {
@@ -248,6 +258,10 @@ export class SupervisorService {
         approvedBy: {
           select: { id: true, user: { select: { name: true } } },
         },
+        // Read-only trail (common/attendance-declines.ts) — with
+        // `lastEditedAt` (a scalar, so already on the row), what lets the
+        // supervisor see what changed since they last declined it.
+        declines: ATTENDANCE_DECLINES_SELECT,
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     });
@@ -451,13 +465,54 @@ export class SupervisorService {
       supervisor.establishmentId,
     );
 
-    const updated = await this.prisma.client.attendance.update({
-      where: { id: attendanceId },
-      data: {
-        status: 'DECLINED',
-        approvedById: supervisor.id,
-        declineReason: reason,
-      },
+    // Approved hours are final: an APPROVED log can't be declined, only a
+    // PENDING one (or a DECLINED one again — the double-click guard below
+    // keeps that from writing a second history row).
+    if (attendance.status === 'APPROVED') {
+      throw new ConflictException(APPROVED_DECLINE_MESSAGE);
+    }
+
+    // The status change and its history row commit together (CLAUDE.md §6
+    // AttendanceDecline): a decline is never recorded without its reason
+    // surviving a later resubmission, and never the other way round. The
+    // snapshot is taken from the row as read above, before this update — the
+    // times the supervisor actually looked at.
+    const declinedBy = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      // Conditional, so an approval that lands between the read above and
+      // this write is never overwritten: no row changed means it is APPROVED
+      // now, and the transaction (history row included) rolls back.
+      const changed = await tx.attendance.updateMany({
+        where: { id: attendanceId, status: { not: 'APPROVED' } },
+        data: {
+          status: 'DECLINED',
+          approvedById: supervisor.id,
+          declineReason: reason,
+        },
+      });
+      if (changed.count === 0) {
+        throw new ConflictException(APPROVED_DECLINE_MESSAGE);
+      }
+      const latest = await tx.attendanceDecline.findFirst({
+        where: { attendanceId },
+        orderBy: { declinedAt: 'desc' },
+        select: { reason: true, declinedAt: true },
+      });
+      if (isNewDecline(latest, attendance, reason)) {
+        await tx.attendanceDecline.create({
+          data: {
+            attendanceId,
+            reason,
+            declinedById: supervisor.id,
+            declinedByName: declinedBy?.name ?? null,
+            ...declineSnapshot(attendance),
+          },
+        });
+      }
+      return tx.attendance.findUniqueOrThrow({ where: { id: attendanceId } });
     });
 
     await this.notifications.notify(this.prisma.client, {

@@ -12,6 +12,7 @@ import SelectField from "@/components/ui/SelectField";
 import { SupervisorAttendance } from "@/lib/api/supervisorApi";
 import type { AttendanceStatus } from "@/lib/api/studentPortalApi";
 import { formatDateOnly } from "@/lib/format";
+import AttendanceChangeNote from "@/components/ui/AttendanceChangeNote";
 
 interface ApprovalTableProps {
   rows: SupervisorAttendance[];
@@ -125,11 +126,9 @@ export default function ApprovalTable({
       render: (r) => (
         <div className="max-w-xs">
           <span className="text-gray-600">{r.remarks || "—"}</span>
-          {r.status === "DECLINED" && r.declineReason && (
-            <p className="text-xs text-red-600 mt-1">
-              <span className="font-medium">Declined:</span> {r.declineReason}
-            </p>
-          )}
+          {/* What changed since a decline, so the supervisor knows what to
+              re-check: the latest reason and when the student last edited. */}
+          <AttendanceChangeNote {...r} />
         </div>
       ),
     },
@@ -164,9 +163,16 @@ export default function ApprovalTable({
               <Check size={14} />
               Approve
             </button>
+            {/* Approved hours are final — the server refuses to decline an
+                APPROVED log (409), so the action is not offered for one. */}
             <button
               onClick={() => onDecline(r)}
-              disabled={busy || r.status === "DECLINED"}
+              disabled={busy || r.status !== "PENDING"}
+              title={
+                r.status === "APPROVED"
+                  ? "This log is already approved and can't be declined."
+                  : undefined
+              }
               className="px-2 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent inline-flex items-center gap-1 text-xs font-medium"
               aria-label={`Decline ${r.student.user.name}'s log`}
             >
