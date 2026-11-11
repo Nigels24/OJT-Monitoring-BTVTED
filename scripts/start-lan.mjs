@@ -1,6 +1,8 @@
 // Starts the API and the website together, for the school network.
 //
 //   npm run start:lan        (from the repository's top folder)
+//   WEB_PORT=3003 API_PORT=3004 npm run start:lan
+//                            (other ports; defaults 3001 and 3000 — see ports.cjs)
 //
 // Both must already be built (npm run build:all). Closing this window, or
 // pressing Ctrl+C, stops both. To have them start by themselves when the
@@ -13,6 +15,17 @@ import { existsSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import portsModule from './ports.cjs';
+
+const ports = portsModule.resolvePorts();
+const port = ports.webPort;
+if (ports.webPort === ports.apiPort) {
+  console.error(
+    `WEB_PORT and API_PORT are both ${port}; the website and the API need ` +
+      'different ports.',
+  );
+  process.exit(1);
+}
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const server = join(root, 'app', 'server');
@@ -26,21 +39,29 @@ if (!existsSync(apiEntry) || !existsSync(join(client, '.next'))) {
 }
 
 const children = [
-  spawn(process.execPath, [apiEntry], { cwd: server, stdio: 'inherit' }),
-  spawn(process.execPath, [nextBin, 'start', '-H', '0.0.0.0', '-p', '3001'], {
-    cwd: client,
+  spawn(process.execPath, [apiEntry], {
+    cwd: server,
     stdio: 'inherit',
+    env: { ...process.env, ...ports.apiEnv },
   }),
+  spawn(
+    process.execPath,
+    [nextBin, 'start', '-H', '0.0.0.0', '-p', String(port)],
+    { cwd: client, stdio: 'inherit', env: { ...process.env, ...ports.webEnv } },
+  ),
 ];
 
 const addresses = Object.values(networkInterfaces())
   .flat()
   .filter((net) => net && net.family === 'IPv4' && !net.internal)
-  .map((net) => `http://${net.address}:3001`);
+  .map((net) => `http://${net.address}:${port}`);
 console.log('\nOJT-Track is starting.');
-console.log('  On this computer:      http://localhost:3001');
+console.log(`  On this computer:      http://localhost:${port}`);
 for (const address of addresses) {
   console.log(`  From other devices:    ${address}`);
+}
+if (ports.apiEnv.PORT) {
+  console.log(`  API (this computer):   ${ports.apiInternalUrl}`);
 }
 console.log('  Press Ctrl+C to stop.\n');
 
