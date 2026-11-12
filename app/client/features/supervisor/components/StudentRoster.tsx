@@ -82,7 +82,24 @@ export default function StudentRoster({
         </div>
       ),
     },
-    { key: "course", label: "Course", render: (r) => r.course || "—" },
+    {
+      // A program name is long ("Bachelor of Technical-Vocational Teacher
+      // Education…"): give it room to read as a phrase, cap it at two lines,
+      // and keep the whole name in the tooltip.
+      key: "course",
+      label: "Course",
+      render: (r) =>
+        r.course ? (
+          <span
+            title={r.course}
+            className="block min-w-[10rem] max-w-[16rem] line-clamp-2"
+          >
+            {r.course}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     {
       key: "hours",
       label: "Hours",

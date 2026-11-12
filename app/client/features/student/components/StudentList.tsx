@@ -16,6 +16,7 @@ import DataTable, { DataTableColumn } from "@/components/ui/DataTable";
 import ProgressBar from "@/components/ui/ProgressBar";
 import StatusBadge, { BadgeVariant } from "@/components/ui/StatusBadge";
 import LoginEmailBadge from "@/components/ui/LoginEmailBadge";
+import RowMenu from "@/components/ui/RowMenu";
 import { Student, StudentStatus } from "@/lib/api/studentApi";
 
 interface StudentListProps {
@@ -77,21 +78,19 @@ export default function StudentList({
   }, [localSearch, onSearchChange, onPageChange]);
 
   const columns: DataTableColumn<Student>[] = [
-    {
-      key: "studentIdNumber",
-      label: "ID",
-      render: (r) => (
-        <span className="font-mono text-xs text-gray-700">
-          {r.studentIdNumber}
-        </span>
-      ),
-    },
+    // Laptop width (~1280) is the target: the columns below fit there without
+    // scrolling sideways. Pairs that are read together share a cell (ID with
+    // the name, hours with the bar, training with the account status), the
+    // secondary columns wait for 2xl, and the rarer actions sit in a menu.
     {
       key: "student",
       label: "Student",
       render: (r) => (
-        <div className="min-w-36">
+        <div className="min-w-36 max-w-56">
           <div className="font-semibold text-gray-900">{r.user.name}</div>
+          <div className="font-mono text-xs text-gray-600">
+            {r.studentIdNumber}
+          </div>
           <div className="text-xs text-gray-500 break-all">{r.user.email}</div>
         </div>
       ),
@@ -103,7 +102,7 @@ export default function StudentList({
       // one word per line in a column this narrow. The whole name is in the
       // tooltip and in the student's details.
       render: (r) => (
-        <div className="w-40 xl:w-56">
+        <div className="w-36 2xl:w-56">
           <div className="truncate" title={r.course ?? undefined}>
             {r.course || "—"}
           </div>
@@ -118,7 +117,7 @@ export default function StudentList({
       label: "Establishment",
       render: (r) =>
         r.hasActiveAssignment ? (
-          <div className="w-36 truncate" title={r.establishment?.name}>
+          <div className="w-32 2xl:w-44 truncate" title={r.establishment?.name}>
             {r.establishment?.name || "Unassigned"}
           </div>
         ) : (
@@ -129,27 +128,18 @@ export default function StudentList({
       key: "contactNumber",
       label: "Contact",
       // Secondary: in the student's details, off the table until it is wide.
-      className: "hidden xl:table-cell",
+      className: "hidden 2xl:table-cell",
       render: (r) => r.contactNumber || "—",
     },
     {
-      key: "hours",
+      key: "progress",
       label: "Hours",
       render: (r) =>
         r.hasActiveAssignment ? (
-          <span className="whitespace-nowrap">
-            {r.completedHours}/{r.requiredHours} hrs
-          </span>
-        ) : (
-          "—"
-        ),
-    },
-    {
-      key: "progress",
-      label: "Progress",
-      render: (r) =>
-        r.hasActiveAssignment ? (
-          <div className="min-w-28">
+          <div className="min-w-32">
+            <div className="text-xs text-gray-600 mb-1 whitespace-nowrap">
+              {r.completedHours}/{r.requiredHours} hrs
+            </div>
             <ProgressBar
               value={r.completedHours}
               max={r.requiredHours || 1}
@@ -165,7 +155,7 @@ export default function StudentList({
     {
       key: "credentials",
       label: "Credentials",
-      className: "hidden xl:table-cell",
+      className: "hidden 2xl:table-cell",
       render: (r) => (
         <span className="inline-flex items-center gap-1 text-gray-600">
           <FileText size={14} />
@@ -179,33 +169,30 @@ export default function StudentList({
       render: (r) => <LoginEmailBadge account={r.user} />,
     },
     {
-      // Where the training stands, from the student's placements — distinct
-      // from the account status in the next column.
-      key: "trainingStatus",
-      label: "Training",
-      render: (r) => (
-        <span className="whitespace-nowrap text-xs text-gray-700">
-          {r.trainingStatus
-            ? (TRAINING_STATUS_LABEL[r.trainingStatus] ?? r.trainingStatus)
-            : "—"}
-        </span>
-      ),
-    },
-    {
+      // The account status, and under it where the training stands (from the
+      // student's placements) — two different facts, labelled as such.
       key: "status",
       label: "Status",
       render: (r) => (
-        <StatusBadge
-          label={STATUS_LABEL[r.status]}
-          variant={STATUS_VARIANT[r.status]}
-        />
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge
+            label={STATUS_LABEL[r.status]}
+            variant={STATUS_VARIANT[r.status]}
+          />
+          <span className="whitespace-nowrap text-xs text-gray-600">
+            Training:{" "}
+            {r.trainingStatus
+              ? (TRAINING_STATUS_LABEL[r.trainingStatus] ?? r.trainingStatus)
+              : "—"}
+          </span>
+        </div>
       ),
     },
     {
       key: "actions",
       label: "Actions",
       render: (r) => (
-        <div className="flex gap-1 md:gap-2">
+        <div className="flex gap-1 md:gap-2 whitespace-nowrap">
           <button
             onClick={() => onPlace(r)}
             className="p-1 md:p-1.5 rounded-md border border-green-200 text-green-600 hover:bg-green-50"
@@ -218,6 +205,7 @@ export default function StudentList({
             onClick={() => onView(r)}
             className="p-1 md:p-1.5 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50"
             aria-label={`View ${r.user.name}`}
+            title="View"
           >
             <Eye size={14} />
           </button>
@@ -225,24 +213,26 @@ export default function StudentList({
             onClick={() => onEdit(r)}
             className="p-1 md:p-1.5 rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50"
             aria-label={`Edit ${r.user.name}`}
+            title="Edit"
           >
             <Pencil size={14} />
           </button>
-          <button
-            onClick={() => onResendLogin(r)}
-            className="p-1 md:p-1.5 rounded-md border border-amber-200 text-amber-600 hover:bg-amber-50"
-            aria-label={`Resend login to ${r.user.name}`}
-            title="Resend login"
-          >
-            <Send size={14} />
-          </button>
-          <button
-            onClick={() => onDelete(r)}
-            className="p-1 md:p-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50"
-            aria-label={`Delete ${r.user.name}`}
-          >
-            <Trash2 size={14} />
-          </button>
+          <RowMenu
+            label={`More actions for ${r.user.name}`}
+            items={[
+              {
+                label: "Resend login",
+                icon: Send,
+                onSelect: () => onResendLogin(r),
+              },
+              {
+                label: "Delete student",
+                icon: Trash2,
+                onSelect: () => onDelete(r),
+                danger: true,
+              },
+            ]}
+          />
         </div>
       ),
     },

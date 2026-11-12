@@ -1601,10 +1601,22 @@ export class CoordinatorService {
       );
     }
 
+    // A transfer must go somewhere else: "transferring" a student to the
+    // establishment they are already actively placed at would close their
+    // placement and restart it at zero hours for no reason. A new placement
+    // at an establishment where an earlier one has already ended is fine.
+    const currentActive = await this.prisma.client.trainingAssignment.findFirst(
+      {
+        where: { studentId, status: 'ACTIVE' },
+        select: { establishmentId: true },
+      },
+    );
+    if (currentActive?.establishmentId === data.establishmentId) {
+      throw new BadRequestException(SAME_ESTABLISHMENT_MESSAGE);
+    }
+
     // Trainee slots: a full establishment is a warning to confirm, not a
-    // wall — the coordinator may know something the number does not. The
-    // student's own placement there (a re-placement at the same
-    // establishment) is not counted against it, since it is being replaced.
+    // wall — the coordinator may know something the number does not.
     if (establishment.traineeSlots !== null && !data.confirmFull) {
       const activeTrainees = await this.prisma.client.trainingAssignment.count({
         where: {
@@ -1681,6 +1693,10 @@ export class CoordinatorService {
       const activeAssignment = await tx.trainingAssignment.findFirst({
         where: { studentId, status: 'ACTIVE' },
       });
+      // Re-checked here: a placement recorded since the check above counts.
+      if (activeAssignment?.establishmentId === data.establishmentId) {
+        throw new BadRequestException(SAME_ESTABLISHMENT_MESSAGE);
+      }
       if (activeAssignment) {
         await tx.trainingAssignment.update({
           where: { id: activeAssignment.id },
@@ -2060,6 +2076,10 @@ export function assertStartDateFits(
  * recorded the coordinator's grade, and the totals of the supervisor's sheets
  * for that placement, newest first.
  */
+/** createPlacement's answer to a transfer to the establishment a student is already at. */
+export const SAME_ESTABLISHMENT_MESSAGE =
+  'This student is already placed at this establishment. Choose a different establishment to transfer them.';
+
 const ASSIGNMENT_ASSESSMENT_INCLUDE = {
   establishment: { select: { id: true, name: true } },
   gradedBy: GRADED_BY_SELECT,

@@ -34,6 +34,8 @@ export default function PlacementDialog({
     establishments,
     establishmentId,
     setEstablishmentId,
+    currentEstablishmentId,
+    isSameEstablishment,
     requiredHours,
     setRequiredHours,
     defaults,
@@ -115,16 +117,26 @@ export default function PlacementDialog({
               placeholder="Select Establishment"
               options={establishments.map((e) => ({
                 label:
-                  e.status === "INACTIVE"
-                    ? `${e.name} (Inactive)`
-                    : hasNoFreeSlots(e)
-                      ? `${e.name} (Full)`
-                      : e.name,
+                  e.id === currentEstablishmentId
+                    ? `${e.name} (Already placed here)`
+                    : e.status === "INACTIVE"
+                      ? `${e.name} (Inactive)`
+                      : hasNoFreeSlots(e)
+                        ? `${e.name} (Full)`
+                        : e.name,
                 value: e.id,
-                disabled: e.status === "INACTIVE",
+                // A transfer must go somewhere else; the server refuses it too.
+                disabled:
+                  e.status === "INACTIVE" || e.id === currentEstablishmentId,
               }))}
               className="w-full"
             />
+            {isSameEstablishment && (
+              <p role="alert" className="text-xs mt-1.5 font-semibold text-red-600">
+                Student is already placed here. Choose a different
+                establishment to transfer them.
+              </p>
+            )}
             {slots && (
               <p
                 className={`text-xs mt-1.5 ${

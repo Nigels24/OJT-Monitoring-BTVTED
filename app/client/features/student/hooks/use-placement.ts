@@ -158,9 +158,14 @@ export function usePlacement(
     serverSaysFull ||
     (!!slots &&
       slots.traineeSlots !== null &&
-      slots.activeTrainees >= slots.traineeSlots &&
-      // Re-recording at the establishment they are already at takes no new slot.
-      activeAssignment?.establishmentId !== establishmentId);
+      slots.activeTrainees >= slots.traineeSlots);
+
+  // A transfer has to go somewhere else — the server answers 400 for the
+  // establishment the student is already actively placed at. The dropdown
+  // disables that entry; this keeps the button off regardless.
+  const currentEstablishmentId = activeAssignment?.establishmentId ?? null;
+  const isSameEstablishment =
+    !!establishmentId && establishmentId === currentEstablishmentId;
 
   const [createPlacement, { isLoading: isSubmitting }] =
     useCreatePlacementMutation();
@@ -177,6 +182,7 @@ export function usePlacement(
     dutyDays.length > 0 &&
     !!startDate &&
     !!academicYear &&
+    !isSameEstablishment &&
     (!activeAssignment || confirmed) &&
     (!isFull || confirmedFull);
 
@@ -238,6 +244,8 @@ export function usePlacement(
     setBlockId,
     blockOptions: blockOptions ?? [],
     activeAssignment,
+    currentEstablishmentId,
+    isSameEstablishment,
     confirmed,
     setConfirmed,
     slots,

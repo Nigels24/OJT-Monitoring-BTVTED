@@ -155,7 +155,7 @@ export default function BlocksPanel({
               <th className="text-left font-medium text-gray-500 pb-2 text-xs">
                 Coordinator
               </th>
-              <th className="text-left font-medium text-gray-500 pb-2 text-xs">
+              <th className="hidden sm:table-cell text-left font-medium text-gray-500 pb-2 text-xs">
                 Students
               </th>
               <th className="text-right font-medium text-gray-500 pb-2 text-xs">
@@ -185,7 +185,7 @@ export default function BlocksPanel({
                       <span className="text-gray-400 italic">Unassigned</span>
                     )}
                   </td>
-                  <td className="py-2 text-gray-700">
+                  <td className="hidden sm:table-cell py-2 text-gray-700">
                     {block._count?.students ?? 0}
                   </td>
                   <td className="py-2 text-right">
@@ -263,64 +263,101 @@ function RowForm({
   onCancel: () => void;
   loading: boolean;
 }) {
+  const input =
+    "h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400";
+  const fields = {
+    name: (
+      <input
+        value={row.name}
+        onChange={(e) => setRow({ ...row, name: e.target.value })}
+        placeholder="Block A"
+        aria-label="Block name"
+        className={`w-full sm:w-28 ${input}`}
+      />
+    ),
+    yearLevel: (
+      <input
+        type="number"
+        min={1}
+        value={row.yearLevel}
+        onChange={(e) => setRow({ ...row, yearLevel: e.target.value })}
+        placeholder="Year"
+        aria-label="Year level"
+        className={`w-full sm:w-16 ${input}`}
+      />
+    ),
+    academicYear: (
+      <input
+        value={row.academicYear}
+        onChange={(e) => setRow({ ...row, academicYear: e.target.value })}
+        placeholder="2025-2026"
+        aria-label="Academic year"
+        className={`w-full sm:w-28 ${input}`}
+      />
+    ),
+    coordinator: (
+      <SelectField
+        value={row.coordinatorId}
+        onChange={(value) => setRow({ ...row, coordinatorId: value })}
+        options={coordinatorOptions}
+        className="w-full sm:w-40"
+      />
+    ),
+  };
+  const actions = (
+    <div className="flex justify-end gap-1.5">
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={loading}
+        className="p-1 rounded-md border border-green-200 text-green-600 hover:bg-green-50 disabled:opacity-50"
+        aria-label="Save"
+      >
+        <Check size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="p-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50"
+        aria-label="Cancel"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+
+  // Phones: the four inputs side by side are wider than the screen, so the
+  // row becomes one full-width cell with the fields stacked. Only one of the
+  // two rows is ever rendered visible, and both edit the same `row`.
   return (
     <tr className="border-b border-gray-50 last:border-0 bg-blue-50/40">
-      <td className="py-2 pr-2">
-        <input
-          value={row.name}
-          onChange={(e) => setRow({ ...row, name: e.target.value })}
-          placeholder="Block A"
-          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
-        />
-      </td>
-      <td className="py-2 pr-2">
-        <input
-          type="number"
-          min={1}
-          value={row.yearLevel}
-          onChange={(e) => setRow({ ...row, yearLevel: e.target.value })}
-          placeholder="Year"
-          className="w-16 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
-        />
-      </td>
-      <td className="py-2 pr-2">
-        <input
-          value={row.academicYear}
-          onChange={(e) => setRow({ ...row, academicYear: e.target.value })}
-          placeholder="2025-2026"
-          className="w-28 h-8 px-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white placeholder:text-gray-400"
-        />
-      </td>
-      <td className="py-2 pr-2">
-        <SelectField
-          value={row.coordinatorId}
-          onChange={(value) => setRow({ ...row, coordinatorId: value })}
-          options={coordinatorOptions}
-          className="w-40"
-        />
-      </td>
-      <td className="py-2" />
-      <td className="py-2 text-right">
-        <div className="flex justify-end gap-1.5">
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={loading}
-            className="p-1 rounded-md border border-green-200 text-green-600 hover:bg-green-50 disabled:opacity-50"
-            aria-label="Save"
-          >
-            <Check size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="p-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50"
-            aria-label="Cancel"
-          >
-            <X size={12} />
-          </button>
+      <td colSpan={6} className="py-3 sm:hidden">
+        <div className="grid grid-cols-2 gap-2">
+          <label className="col-span-2 text-xs text-gray-500">
+            Name
+            <div className="mt-1">{fields.name}</div>
+          </label>
+          <label className="text-xs text-gray-500">
+            Year
+            <div className="mt-1">{fields.yearLevel}</div>
+          </label>
+          <label className="text-xs text-gray-500">
+            Academic Year
+            <div className="mt-1">{fields.academicYear}</div>
+          </label>
+          <div className="col-span-2 text-xs text-gray-500">
+            Coordinator
+            <div className="mt-1">{fields.coordinator}</div>
+          </div>
+          <div className="col-span-2">{actions}</div>
         </div>
       </td>
+      <td className="hidden sm:table-cell py-2 pr-2">{fields.name}</td>
+      <td className="hidden sm:table-cell py-2 pr-2">{fields.yearLevel}</td>
+      <td className="hidden sm:table-cell py-2 pr-2">{fields.academicYear}</td>
+      <td className="hidden sm:table-cell py-2 pr-2">{fields.coordinator}</td>
+      <td className="hidden sm:table-cell py-2" />
+      <td className="hidden sm:table-cell py-2 text-right">{actions}</td>
     </tr>
   );
 }

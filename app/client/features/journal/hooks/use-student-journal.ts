@@ -12,6 +12,7 @@ import {
   type StudentJournalEntry,
 } from "@/lib/api/journalApi";
 import { useSnackbar } from "@/lib/contexts/SnackbarContext";
+import { dutyDayError as dutyDayErrorFor } from "@/lib/duty-days";
 
 const EMPTY_FORM = { entryDate: "", activities: "", learnings: "" };
 
@@ -32,27 +33,6 @@ export interface PickedPhoto {
 }
 
 const subscribeToNothing = () => () => {};
-
-/** JS `getUTCDay()` (0 = Sunday) to the Weekday values the API uses. */
-const WEEKDAY_BY_JS_DAY = [
-  "SUN",
-  "MON",
-  "TUE",
-  "WED",
-  "THU",
-  "FRI",
-  "SAT",
-] as const;
-
-const WEEKDAY_LABELS: Record<string, string> = {
-  MON: "Mon",
-  TUE: "Tue",
-  WED: "Wed",
-  THU: "Thu",
-  FRI: "Fri",
-  SAT: "Sat",
-  SUN: "Sun",
-};
 
 /**
  * Today as `yyyy-mm-dd` in the browser's own zone, never via `toISOString()` —
@@ -260,16 +240,14 @@ export function useStudentJournal() {
       ? `Your placement starts on ${formatDateLabel(startDate!)}. You can write journal entries from then.`
       : undefined;
 
-  /** The duty-day rule, with the server's own wording. */
-  const dutyDayError = useMemo(() => {
-    if (!form.entryDate || !assignment) return "";
-    const weekday =
-      WEEKDAY_BY_JS_DAY[
-        new Date(`${form.entryDate}T00:00:00Z`).getUTCDay() as 0
-      ];
-    if (assignment.dutyDays.includes(weekday)) return "";
-    return `${WEEKDAY_LABELS[weekday]} is not one of your scheduled duty days (${assignment.dutyDaysLabel}).`;
-  }, [form.entryDate, assignment]);
+  /** The duty-day rule, with the server's own wording (`lib/duty-days.ts`). */
+  const dutyDayError = useMemo(
+    () =>
+      form.entryDate && assignment
+        ? dutyDayErrorFor(form.entryDate, assignment.dutyDays)
+        : "",
+    [form.entryDate, assignment],
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
